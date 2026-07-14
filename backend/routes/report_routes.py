@@ -13,8 +13,9 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 async def get_dashboard_stats(current_user: dict = Depends(require_role("admin", "manager"))):
     orders = get_collection("orders")
     
-    now = datetime.now(timezone.utc)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    now_local = datetime.now().astimezone()
+    day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start = day_start_local.astimezone(timezone.utc)
     
     # Aggregation for all-time stats and payment method
     pipeline_all = [

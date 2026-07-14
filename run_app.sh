@@ -10,7 +10,7 @@ bash "$APP_DIR/start.sh" &
 SERVER_PID=$!
 
 # Đợi khoảng 3 giây để server Uvicorn kịp mở cổng 8000
-sleep 3
+sleep 10
 
 # 2. Khởi động Client (Google Chrome Kiosk Mode)
 # Sử dụng --user-data-dir riêng để đảm bảo tiến trình Chrome không bị gộp vào session đang mở của người dùng (gây tắt script ngay lập tức)

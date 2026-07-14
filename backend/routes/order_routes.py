@@ -27,12 +27,12 @@ async def _generate_order_number() -> str:
     Format: ``ORD-YYYYMMDD-XXXX`` where XXXX is a zero-padded counter
     that resets daily.
     """
-    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    today_str = datetime.now().astimezone().strftime("%Y%m%d")
     prefix = f"ORD-{today_str}-"
 
     counters = get_collection("counters")
     counter_doc = await counters.find_one_and_update(
-        {"_id": "order_number", "date": today_str},
+        {"_id": f"order_number_{today_str}"},
         {"$inc": {"seq": 1}},
         upsert=True,
         return_document=ReturnDocument.AFTER,
