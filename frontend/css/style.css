@@ -1,0 +1,523 @@
+/* ============================================================
+   EViENT POS - Custom Styles (Supplement to Tailwind CSS)
+   ============================================================ */
+
+/* --- Custom Scrollbar (thin, dark) --- */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0F172A;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 #0F172A;
+}
+
+/* --- Base Transitions --- */
+.transition-default {
+    transition: all 150ms ease;
+}
+
+/* --- POS Grid Layout --- */
+.pos-product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem;
+}
+
+@media (min-width: 1280px) {
+    .pos-product-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    }
+}
+
+/* --- Card Hover Effects --- */
+.card-hover {
+    transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    border-color: #3B82F6;
+}
+
+.card-hover:active {
+    transform: translateY(0);
+}
+
+/* --- Modal Overlay --- */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 150ms ease;
+}
+
+.modal-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.modal-content {
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    width: 90%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    transform: scale(0.95);
+    transition: transform 150ms ease;
+}
+
+.modal-overlay.active .modal-content {
+    transform: scale(1);
+}
+
+/* --- Tab Active State --- */
+.tab-btn {
+    padding: 0.625rem 1.25rem;
+    border-bottom: 2px solid transparent;
+    color: #94A3B8;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 150ms ease, border-color 150ms ease;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.tab-btn:hover {
+    color: #CBD5E1;
+}
+
+.tab-btn.active {
+    color: #3B82F6;
+    border-bottom-color: #3B82F6;
+}
+
+/* --- Toast Notification --- */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    pointer-events: none;
+}
+
+.toast {
+    padding: 0.75rem 1.25rem;
+    border-radius: 0.5rem;
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: opacity 150ms ease, transform 150ms ease;
+    max-width: 360px;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.toast.toast-success {
+    background: #065F46;
+    border-left: 4px solid #10B981;
+}
+
+.toast.toast-error {
+    background: #7F1D1D;
+    border-left: 4px solid #EF4444;
+}
+
+.toast.toast-warning {
+    background: #78350F;
+    border-left: 4px solid #F59E0B;
+}
+
+.toast.toast-info {
+    background: #1E3A5F;
+    border-left: 4px solid #3B82F6;
+}
+
+/* --- Loading Spinner --- */
+.spinner {
+    width: 2rem;
+    height: 2rem;
+    border: 3px solid #334155;
+    border-top-color: #3B82F6;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+.spinner-sm {
+    width: 1.25rem;
+    height: 1.25rem;
+    border-width: 2px;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* --- Loading overlay for sections --- */
+.loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    z-index: 10;
+}
+
+/* --- Touch-friendly buttons --- */
+.btn {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background-color 150ms ease, transform 150ms ease;
+    border: none;
+    outline: none;
+    user-select: none;
+}
+
+.btn:active {
+    transform: scale(0.97);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-primary {
+    background: #3B82F6;
+    color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #2563EB;
+}
+
+.btn-success {
+    background: #10B981;
+    color: #fff;
+}
+
+.btn-success:hover:not(:disabled) {
+    background: #059669;
+}
+
+.btn-danger {
+    background: #EF4444;
+    color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #DC2626;
+}
+
+.btn-warning {
+    background: #F59E0B;
+    color: #1E293B;
+}
+
+.btn-warning:hover:not(:disabled) {
+    background: #D97706;
+}
+
+.btn-ghost {
+    background: transparent;
+    color: #94A3B8;
+}
+
+.btn-ghost:hover:not(:disabled) {
+    background: #1E293B;
+    color: #E2E8F0;
+}
+
+/* --- Table Styles --- */
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-table th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #94A3B8;
+    border-bottom: 1px solid #334155;
+}
+
+.admin-table td {
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: #CBD5E1;
+    border-bottom: 1px solid #1E293B;
+}
+
+.admin-table tbody tr {
+    transition: background-color 150ms ease;
+}
+
+.admin-table tbody tr:hover {
+    background: #1E293B;
+}
+
+/* --- Cart Item --- */
+.cart-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0;
+    border-bottom: 1px solid #334155;
+    transition: background-color 150ms ease;
+}
+
+.cart-item:last-child {
+    border-bottom: none;
+}
+
+/* --- Qty Controls --- */
+.qty-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    background: #334155;
+    color: #E2E8F0;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: background-color 150ms ease;
+    line-height: 1;
+}
+
+.qty-btn:hover {
+    background: #475569;
+}
+
+/* --- Form Inputs --- */
+.form-input {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    background: #0F172A;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    color: #E2E8F0;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 150ms ease;
+    min-height: 44px;
+}
+
+.form-input:focus {
+    border-color: #3B82F6;
+}
+
+.form-input::placeholder {
+    color: #64748B;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #94A3B8;
+}
+
+.form-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394A3B8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2.5rem;
+}
+
+/* --- Pagination --- */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 0;
+}
+
+.page-btn {
+    min-width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    background: #1E293B;
+    color: #94A3B8;
+    font-size: 0.8125rem;
+    cursor: pointer;
+    border: 1px solid #334155;
+    transition: all 150ms ease;
+}
+
+.page-btn:hover:not(:disabled) {
+    background: #334155;
+    color: #E2E8F0;
+}
+
+.page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.page-btn.active {
+    background: #3B82F6;
+    border-color: #3B82F6;
+    color: #fff;
+}
+
+/* --- Badge --- */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.badge-success {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10B981;
+}
+
+.badge-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #EF4444;
+}
+
+.badge-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #F59E0B;
+}
+
+.badge-info {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3B82F6;
+}
+
+/* --- Empty State --- */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+    color: #64748B;
+    text-align: center;
+}
+
+.empty-state svg {
+    width: 3rem;
+    height: 3rem;
+    margin-bottom: 0.75rem;
+    opacity: 0.5;
+}
+
+/* --- Product Card --- */
+.product-card {
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 0.625rem;
+    padding: 1rem;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-height: 120px;
+}
+
+/* --- Print Styles --- */
+@media print {
+    body * {
+        visibility: hidden;
+    }
+
+    .print-area,
+    .print-area * {
+        visibility: visible;
+    }
+
+    .print-area {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+    }
+
+    .no-print {
+        display: none !important;
+    }
+}
+
+/* --- Stock indicator --- */
+.stock-low {
+    color: #F59E0B;
+}
+
+.stock-out {
+    color: #EF4444;
+}
+
+.stock-ok {
+    color: #10B981;
+}

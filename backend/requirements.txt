@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+motor
+pyjwt
+passlib[bcrypt]
+bcrypt
+pillow
+python-multipart
+pydantic[email]
+pyserial==3.5

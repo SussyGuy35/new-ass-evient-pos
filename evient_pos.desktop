@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=EViENT POS
+Comment=Phần mềm Quản lý Bán hàng EViENT POS
+Exec=/home/sussyguy/new-ass-app/run_app.sh
+Terminal=true
+Icon=utilities-terminal
+Categories=Office;Finance;
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+StartupNotify=false
