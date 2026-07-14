@@ -24,6 +24,9 @@ function showToast(message, type = 'info') {
         container = document.createElement('div');
         container.id = 'toast-container';
         container.className = 'toast-container';
+        container.style.top = 'auto';
+        container.style.bottom = '1rem';
+        container.style.flexDirection = 'column-reverse';
         document.body.appendChild(container);
     }
 
