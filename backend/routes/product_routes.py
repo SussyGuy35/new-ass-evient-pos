@@ -11,6 +11,7 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import re
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -48,10 +49,11 @@ async def list_products(
 
     query_filter: dict = {}
     if q:
+        safe_q = re.escape(q)
         query_filter = {
             "$or": [
-                {"name": {"$regex": q, "$options": "i"}},
-                {"barcode": {"$regex": q, "$options": "i"}},
+                {"name": {"$regex": safe_q, "$options": "i"}},
+                {"barcode": {"$regex": safe_q, "$options": "i"}},
             ]
         }
 

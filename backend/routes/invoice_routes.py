@@ -179,7 +179,7 @@ async def get_invoice_png(
     y += 10
     draw.text(
         (WIDTH // 2 - 60, y),
-        "Thank you for shopping!",
+        "Cảm ơn bạn và hẹn gặp lại!",
         fill="gray",
         font=font,
     )

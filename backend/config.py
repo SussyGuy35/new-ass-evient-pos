@@ -27,9 +27,11 @@ class Settings:
             "MONGO_URI", "mongodb://localhost:27017"
         )
         self.DB_NAME: str = os.environ.get("DB_NAME", "evient_pos")
-        self.JWT_SECRET: str = os.environ.get(
-            "JWT_SECRET", "evient-pos-secret-key-2024"
-        )
+        
+        self.JWT_SECRET: str | None = os.environ.get("JWT_SECRET")
+        if not self.JWT_SECRET:
+            raise ValueError("JWT_SECRET environment variable is required and must be set in .env")
+            
         self.JWT_EXPIRATION: int = int(
             os.environ.get("JWT_EXPIRATION", "28800")
         )

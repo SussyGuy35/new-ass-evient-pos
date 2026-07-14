@@ -450,7 +450,7 @@ async function loadOrders(page = 1) {
                     <td style="text-align: right;">
                         <button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem;"
                                 onclick="downloadInvoice('${o.id || o.order_id}')">
-                            📄 Tải HĐ
+                            📄 Xem HĐ
                         </button>
                     </td>
                 </tr>
@@ -467,10 +467,7 @@ async function loadOrders(page = 1) {
     }
 }
 
-function downloadInvoice(orderId) {
-    const token = auth.getToken();
-    window.open(`${APP_CONFIG.API_BASE_URL}/invoices/${orderId}/png?token=${token}`, '_blank');
-}
+
 
 // =====================
 // TAB: LOGS

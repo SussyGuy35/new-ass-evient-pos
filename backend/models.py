@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class UserCreate(BaseModel):
     """Schema for creating a new user account."""
-    username: str = Field(..., min_length=3, max_length=50)
+    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
     password: str = Field(..., min_length=6)
     full_name: str = Field(..., min_length=1, max_length=100)
     role: str = Field(default="employee", pattern="^(admin|manager|employee)$")

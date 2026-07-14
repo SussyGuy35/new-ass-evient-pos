@@ -9,6 +9,7 @@ Endpoints:
 
 from datetime import datetime, timezone
 
+from pymongo import ReturnDocument, UpdateOne
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -29,17 +30,15 @@ async def _generate_order_number() -> str:
     today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
     prefix = f"ORD-{today_str}-"
 
-    orders = get_collection("orders")
-    last_order = await orders.find_one(
-        {"order_number": {"$regex": f"^{prefix}"}},
-        sort=[("order_number", -1)],
+    counters = get_collection("counters")
+    counter_doc = await counters.find_one_and_update(
+        {"_id": "order_number", "date": today_str},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
     )
-
-    if last_order:
-        last_seq = int(last_order["order_number"].split("-")[-1])
-        next_seq = last_seq + 1
-    else:
-        next_seq = 1
+    
+    next_seq = counter_doc["seq"]
 
     return f"{prefix}{next_seq:04d}"
 
@@ -86,14 +85,23 @@ async def create_order(
 
     # Deduct stock for each product
     products_col = get_collection("products")
+    bulk_ops = []
     for item in body.items:
         try:
             pid = ObjectId(item.product_id)
-            await products_col.update_one(
+            bulk_ops.append(UpdateOne(
                 {"_id": pid},
                 {"$inc": {"stock": -item.quantity}}
-            )
+            ))
         except Exception:
+            pass
+            
+    if bulk_ops:
+        try:
+            await products_col.bulk_write(bulk_ops)
+        except Exception:
+            # Note: without transactions, this operation is still not fully atomic
+            # but bulk_write minimizes the risk window.
             pass
 
     # Audit log

@@ -11,6 +11,7 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import re
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -300,7 +301,8 @@ async def end_shift(current_user: dict = Depends(get_current_user)):
     log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
     os.makedirs(log_dir, exist_ok=True)
     
-    filename = f"shift_{current_user['username']}_{now.strftime('%Y%m%d_%H%M%S')}.log"
+    safe_username = re.sub(r'[^a-zA-Z0-9_-]', '', current_user['username'])
+    filename = f"shift_{safe_username}_{now.strftime('%Y%m%d_%H%M%S')}.log"
     filepath = os.path.join(log_dir, filename)
     
     with open(filepath, "w", encoding="utf-8") as f:

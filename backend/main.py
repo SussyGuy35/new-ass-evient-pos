@@ -9,6 +9,7 @@ Wires up:
     * Root redirect to ``/index.html``
 """
 
+import json
 import os
 from contextlib import asynccontextmanager
 
@@ -58,7 +59,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8000", "http://127.0.0.1:8000", "http://localhost", "http://127.0.0.1"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,15 +96,15 @@ async def get_frontend_config():
  * EViENT POS - Application Configuration (Auto-generated)
  */
 const APP_CONFIG = {{
-    API_BASE_URL: '{settings.API_BASE_URL}',
-    CASH_DRAWER_COMMAND: '{cash_drawer}',
-    BAUD_RATE: {settings.BAUD_RATE},
-    BARCODE_TIMEOUT: {settings.BARCODE_TIMEOUT},
-    ITEMS_PER_PAGE: {settings.ITEMS_PER_PAGE},
-    VIETQR_BANK_ID: '{settings.VIETQR_BANK_ID}',
-    VIETQR_ACCOUNT_NO: '{settings.VIETQR_ACCOUNT_NO}',
-    VIETQR_ACCOUNT_NAME: '{settings.VIETQR_ACCOUNT_NAME}',
-    VAT_RATE: {settings.VAT_RATE}
+    API_BASE_URL: {json.dumps(settings.API_BASE_URL)},
+    CASH_DRAWER_COMMAND: {json.dumps(cash_drawer)},
+    BAUD_RATE: {json.dumps(settings.BAUD_RATE)},
+    BARCODE_TIMEOUT: {json.dumps(settings.BARCODE_TIMEOUT)},
+    ITEMS_PER_PAGE: {json.dumps(settings.ITEMS_PER_PAGE)},
+    VIETQR_BANK_ID: {json.dumps(settings.VIETQR_BANK_ID)},
+    VIETQR_ACCOUNT_NO: {json.dumps(settings.VIETQR_ACCOUNT_NO)},
+    VIETQR_ACCOUNT_NAME: {json.dumps(settings.VIETQR_ACCOUNT_NAME)},
+    VAT_RATE: {json.dumps(settings.VAT_RATE)}
 }};
 """
     return Response(content=js_content, media_type="application/javascript")
