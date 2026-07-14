@@ -363,22 +363,171 @@ function showCheckoutModal(paymentMethod) {
             </div>
         `;
     } else {
+        window._cashFields = {
+            'cash-amount-given': "0",
+            'cash-change-actual': "0"
+        };
+        window._cashActiveField = 'cash-amount-given';
         body.innerHTML = `
-            <div style="padding: 2rem 0;">
-                <div class="spinner" style="margin: 0 auto 1rem auto;"></div>
-                <p style="color: #E2E8F0;">Đang xử lý thanh toán...</p>
+            <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Thanh Toán Tiền Mặt</h3>
+            <div style="margin-bottom: 0.5rem; text-align: left;">
+                <label class="form-label">Tổng tiền (VNĐ)</label>
+                <div style="font-size: 1.25rem; color: #3B82F6; font-weight: bold;">${formatCurrency(total)}</div>
+            </div>
+            <div style="margin-bottom: 0.5rem; text-align: left;">
+                <label class="form-label">Khách đưa</label>
+                <input type="text" id="cash-amount-given" class="form-input cash-numpad-field" style="font-size: 1.25rem; font-weight: bold; caret-color: transparent;" value="0" readonly inputmode="none" autocomplete="off">
+            </div>
+            <div style="margin-bottom: 0.5rem; text-align: left;">
+                <label class="form-label">Tiền thừa</label>
+                <div id="cash-change-expected" style="font-size: 1.25rem; color: #10B981; font-weight: bold;">0</div>
+            </div>
+            <div style="margin-bottom: 1rem; text-align: left;">
+                <label class="form-label">Tiền thối thực tế</label>
+                <input type="text" id="cash-change-actual" class="form-input cash-numpad-field" style="font-size: 1.25rem; font-weight: bold; caret-color: transparent;" value="0" readonly inputmode="none" autocomplete="off">
+            </div>
+            <div class="numpad-grid">
+                <button class="numpad-btn" onclick="numpadPress('1')">1</button>
+                <button class="numpad-btn" onclick="numpadPress('2')">2</button>
+                <button class="numpad-btn" onclick="numpadPress('3')">3</button>
+                <button class="numpad-btn" onclick="numpadPress('4')">4</button>
+                <button class="numpad-btn" onclick="numpadPress('5')">5</button>
+                <button class="numpad-btn" onclick="numpadPress('6')">6</button>
+                <button class="numpad-btn" onclick="numpadPress('7')">7</button>
+                <button class="numpad-btn" onclick="numpadPress('8')">8</button>
+                <button class="numpad-btn" onclick="numpadPress('9')">9</button>
+                <button class="numpad-btn" onclick="numpadPress('C')" style="color: #EF4444;">C</button>
+                <button class="numpad-btn" onclick="numpadPress('0')">0</button>
+                <button class="numpad-btn" onclick="numpadPress('000')">000</button>
+            </div>
+            <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.5rem;">
+                <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
+                <button class="btn btn-primary" onclick="submitCashCheckout(${total})" id="btn-confirm-cash">
+                    Hoàn tất thanh toán
+                </button>
             </div>
         `;
-        // Auto complete for cash
-        completeCheckout('cash');
+
+        // Focus tracking: highlight active field, switch numpad target
+        document.querySelectorAll('.cash-numpad-field').forEach(function(el) {
+            el.addEventListener('focus', function() {
+                document.querySelectorAll('.cash-numpad-field').forEach(function(f) {
+                    f.style.borderColor = '';
+                });
+                el.style.borderColor = '#3B82F6';
+                window._cashActiveField = el.id;
+            });
+        });
+
+        // Capture physical keyboard on the modal overlay
+        overlay.addEventListener('keydown', cashKeydownHandler);
     }
 
     overlay.classList.add('active');
+
+    // Focus the amount-given field
+    setTimeout(function() {
+        var input = document.getElementById('cash-amount-given');
+        if (input) {
+            input.focus();
+            input.style.borderColor = '#3B82F6';
+        }
+    }, 50);
 }
 
+function cashKeydownHandler(e) {
+    if (!window._cashFields) return;
+    var key = e.key;
+    if (key >= '0' && key <= '9') {
+        e.preventDefault();
+        numpadPress(key);
+    } else if (key === 'Backspace') {
+        e.preventDefault();
+        numpadPress('BACK');
+    } else if (key === 'Delete' || key === 'Escape') {
+        e.preventDefault();
+        numpadPress('C');
+    } else if (key === 'Tab') {
+        e.preventDefault();
+        var nextField = window._cashActiveField === 'cash-amount-given'
+            ? 'cash-change-actual' : 'cash-amount-given';
+        var nextEl = document.getElementById(nextField);
+        if (nextEl) nextEl.focus();
+    } else if (key === 'Enter') {
+        e.preventDefault();
+        var btn = document.getElementById('btn-confirm-cash');
+        if (btn) btn.click();
+    } else {
+        e.preventDefault();
+    }
+}
+
+function cashRefreshDisplay() {
+    var givenRaw = window._cashFields['cash-amount-given'] || "0";
+    var actualRaw = window._cashFields['cash-change-actual'] || "0";
+    var givenVal = parseInt(givenRaw, 10);
+    var actualVal = parseInt(actualRaw, 10);
+
+    var givenInput = document.getElementById('cash-amount-given');
+    if (givenInput) givenInput.value = formatCurrency(givenVal);
+
+    var actualInput = document.getElementById('cash-change-actual');
+    if (actualInput) actualInput.value = formatCurrency(actualVal);
+
+    var subtotal = calculateTotal();
+    var vatRate = APP_CONFIG.VAT_RATE || 0;
+    var total = subtotal + (subtotal * (vatRate / 100));
+    var expectedChange = givenVal - total;
+    if (expectedChange < 0) expectedChange = 0;
+
+    var changeLabel = document.getElementById('cash-change-expected');
+    if (changeLabel) changeLabel.innerText = formatCurrency(expectedChange);
+
+    // Auto-sync actual change when user is editing given amount
+    if (window._cashActiveField === 'cash-amount-given') {
+        window._cashFields['cash-change-actual'] = String(Math.round(expectedChange));
+        if (actualInput) actualInput.value = formatCurrency(expectedChange);
+    }
+}
+
+window.numpadPress = function(key) {
+    var fieldId = window._cashActiveField || 'cash-amount-given';
+    var raw = window._cashFields[fieldId] || "0";
+    if (key === 'C') {
+        raw = "0";
+    } else if (key === 'BACK') {
+        raw = raw.slice(0, -1);
+        if (!raw) raw = "0";
+    } else {
+        if (raw === "0") {
+            raw = key;
+        } else {
+            raw += key;
+        }
+    }
+    window._cashFields[fieldId] = raw;
+    cashRefreshDisplay();
+};
+
+window.submitCashCheckout = function(total) {
+    var givenVal = parseInt(window._cashFields['cash-amount-given'] || "0", 10);
+    if (givenVal < total) {
+        showToast('Khách đưa không đủ tiền!', 'error');
+        return;
+    }
+    var actualChange = parseInt(window._cashFields['cash-change-actual'] || "0", 10);
+    var expectedChange = givenVal - total;
+    completeCheckout('cash', givenVal, expectedChange, actualChange);
+};
+
+
 function closeCheckoutModal() {
-    const overlay = document.getElementById('checkout-modal-overlay');
-    if (overlay) overlay.classList.remove('active');
+    var overlay = document.getElementById('checkout-modal-overlay');
+    if (overlay) {
+        overlay.removeEventListener('keydown', cashKeydownHandler);
+        overlay.classList.remove('active');
+    }
+    window._cashFields = null;
 }
 
 function downloadInvoice(orderId) {
@@ -440,9 +589,11 @@ function printInvoiceImage() {
     iframe.contentWindow.document.close();
 }
 
-async function completeCheckout(paymentMethod) {
+async function completeCheckout(paymentMethod, amountGiven, expectedChange, actualChange) {
     const confirmBtn = document.getElementById('btn-confirm-transfer');
     if (confirmBtn) confirmBtn.disabled = true;
+    const confirmCashBtn = document.getElementById('btn-confirm-cash');
+    if (confirmCashBtn) confirmCashBtn.disabled = true;
 
     try {
         const orderPayload = {
@@ -456,6 +607,12 @@ async function completeCheckout(paymentMethod) {
             }),
             payment_method: paymentMethod
         };
+        
+        if (paymentMethod === 'cash' && amountGiven !== undefined) {
+            orderPayload.amount_given = amountGiven;
+            orderPayload.expected_change = expectedChange;
+            orderPayload.actual_change = actualChange;
+        }
 
         const result = await api.post('/orders', orderPayload);
         const orderId = result.id || result.order_id;

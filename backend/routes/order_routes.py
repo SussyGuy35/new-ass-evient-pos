@@ -66,6 +66,10 @@ async def create_order(
     total = subtotal + vat_amount
     order_number = await _generate_order_number()
 
+    actual_revenue = total
+    if body.payment_method == "cash" and body.amount_given is not None and body.actual_change is not None:
+        actual_revenue = body.amount_given - body.actual_change
+
     doc = {
         "order_number": order_number,
         "items": [item.model_dump() for item in body.items],
@@ -73,7 +77,11 @@ async def create_order(
         "vat_rate": round(vat_rate, 2),
         "vat_amount": round(vat_amount, 2),
         "total": round(total, 2),
+        "actual_revenue": round(actual_revenue, 2),
         "payment_method": body.payment_method,
+        "amount_given": body.amount_given,
+        "expected_change": body.expected_change,
+        "actual_change": body.actual_change,
         "cashier_id": str(current_user["_id"]),
         "cashier_name": current_user.get("full_name", current_user["username"]),
         "created_at": datetime.now(timezone.utc),

@@ -125,6 +125,9 @@ class OrderCreate(BaseModel):
     """Schema for creating a new order (list of items + payment method)."""
     items: list[OrderItem] = Field(..., min_length=1)
     payment_method: str = Field(default="cash")
+    amount_given: Optional[float] = None
+    expected_change: Optional[float] = None
+    actual_change: Optional[float] = None
 
 
 class OrderResponse(BaseModel):
@@ -138,7 +141,11 @@ class OrderResponse(BaseModel):
     vat_rate: Optional[float] = None
     vat_amount: Optional[float] = None
     total: float
+    actual_revenue: float
     payment_method: str
+    amount_given: Optional[float] = None
+    expected_change: Optional[float] = None
+    actual_change: Optional[float] = None
     cashier_id: str
     cashier_name: str
     created_at: datetime

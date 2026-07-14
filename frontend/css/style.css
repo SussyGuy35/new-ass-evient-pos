@@ -521,3 +521,29 @@
 .stock-ok {
     color: #10B981;
 }
+
+/* --- Numpad --- */
+.numpad-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.numpad-btn {
+    background: #334155;
+    color: #E2E8F0;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 150ms ease, transform 100ms ease;
+    user-select: none;
+}
+
+.numpad-btn:active {
+    transform: scale(0.95);
+    background: #475569;
+}

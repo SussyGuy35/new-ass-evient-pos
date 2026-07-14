@@ -21,7 +21,7 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
     pipeline_all = [
         {"$group": {
             "_id": "$payment_method",
-            "total_revenue": {"$sum": "$total"},
+            "total_revenue": {"$sum": {"$ifNull": ["$actual_revenue", "$total"]}},
             "total_orders": {"$sum": 1}
         }}
     ]
@@ -48,7 +48,7 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
         {"$match": {"created_at": {"$gte": day_start}}},
         {"$group": {
             "_id": None,
-            "total_revenue": {"$sum": "$total"},
+            "total_revenue": {"$sum": {"$ifNull": ["$actual_revenue", "$total"]}},
             "total_orders": {"$sum": 1}
         }}
     ]
