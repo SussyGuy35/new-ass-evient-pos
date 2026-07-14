@@ -26,6 +26,7 @@ from routes.invoice_routes import router as invoice_router
 from routes.log_routes import router as log_router
 from routes.order_routes import router as order_router
 from routes.product_routes import router as product_router
+from routes.report_routes import router as report_router
 from seed import seed_admin
 
 
@@ -75,6 +76,7 @@ app.include_router(order_router, prefix="/api")
 app.include_router(invoice_router, prefix="/api")
 app.include_router(log_router, prefix="/api")
 app.include_router(hardware_router, prefix="/api")
+app.include_router(report_router, prefix="/api")
 
 
 # --------------------------------------------------------------------------

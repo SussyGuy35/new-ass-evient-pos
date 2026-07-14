@@ -30,6 +30,9 @@ function switchTab(tabName) {
 
     // Load data for the active tab
     switch (tabName) {
+        case 'dashboard':
+            loadDashboard();
+            break;
         case 'products':
             loadAdminProducts();
             break;
@@ -42,6 +45,78 @@ function switchTab(tabName) {
         case 'logs':
             loadLogs();
             break;
+    }
+}
+
+// =====================
+// TAB: DASHBOARD
+// =====================
+async function loadDashboard() {
+    const container = document.getElementById('dashboard-content');
+    if (!container) return;
+
+    container.innerHTML = '<div style="text-align: center; padding: 2rem;"><div class="spinner" style="margin: 0 auto;"></div></div>';
+
+    try {
+        const data = await api.get('/reports/dashboard');
+        
+        let html = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+                <div class="bg-slate-700 p-4 rounded-xl border border-slate-600">
+                    <div class="text-sm text-slate-400 mb-1">Doanh thu hôm nay</div>
+                    <div class="text-2xl font-bold text-blue-400">${formatCurrency(data.today.revenue)}</div>
+                    <div class="text-xs text-slate-500 mt-2">${data.today.orders} đơn hàng</div>
+                </div>
+                <div class="bg-slate-700 p-4 rounded-xl border border-slate-600">
+                    <div class="text-sm text-slate-400 mb-1">Tổng doanh thu</div>
+                    <div class="text-2xl font-bold text-emerald-400">${formatCurrency(data.all_time.revenue)}</div>
+                    <div class="text-xs text-slate-500 mt-2">${data.all_time.orders} đơn hàng</div>
+                </div>
+                <div class="bg-slate-700 p-4 rounded-xl border border-slate-600">
+                    <div class="text-sm text-slate-400 mb-1">Tiền mặt</div>
+                    <div class="text-xl font-bold text-white">${formatCurrency(data.all_time.cash_revenue)}</div>
+                </div>
+                <div class="bg-slate-700 p-4 rounded-xl border border-slate-600">
+                    <div class="text-sm text-slate-400 mb-1">Chuyển khoản</div>
+                    <div class="text-xl font-bold text-white">${formatCurrency(data.all_time.transfer_revenue)}</div>
+                </div>
+            </div>
+            
+            <h3 class="text-lg font-bold text-white mb-4">Top 5 Sản phẩm Bán chạy</h3>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Sản phẩm</th>
+                        <th style="text-align: right;">Đã bán</th>
+                        <th style="text-align: right;">Doanh thu</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        if (data.top_products && data.top_products.length > 0) {
+            data.top_products.forEach(p => {
+                html += `
+                    <tr>
+                        <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(p.name)}</td>
+                        <td style="text-align: right; color: #94A3B8;">${p.quantity}</td>
+                        <td style="text-align: right; color: #3B82F6; font-weight: 500;">${formatCurrency(p.revenue)}</td>
+                    </tr>
+                `;
+            });
+        } else {
+            html += `<tr><td colspan="3" style="text-align: center; color: #64748B;">Chưa có dữ liệu</td></tr>`;
+        }
+        
+        html += `
+                </tbody>
+            </table>
+        `;
+        
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = `<div class="empty-state"><p>Lỗi tải báo cáo: ${err.message}</p></div>`;
+        showToast('Lỗi tải báo cáo: ' + err.message, 'error');
     }
 }
 
@@ -639,12 +714,15 @@ function initAdmin() {
         });
     }
 
-    // Hide users tab if not admin
+    // Hide users and logs tabs if not admin
     if (user && user.role !== 'admin') {
         const usersTab = document.querySelector('[data-tab="users"]');
         if (usersTab) usersTab.style.display = 'none';
+        
+        const logsTab = document.querySelector('[data-tab="logs"]');
+        if (logsTab) logsTab.style.display = 'none';
     }
 
     // Load initial tab
-    switchTab('products');
+    switchTab('dashboard');
 }

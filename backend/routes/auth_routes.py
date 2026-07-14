@@ -160,6 +160,34 @@ async def create_user(
     return UserResponse.from_doc(doc)
 
 
+@router.get("/users/{user_id}", response_model=UserResponse)
+async def get_user(
+    user_id: str,
+    current_user: dict = Depends(require_role("admin")),
+):
+    """Get details of a single user.
+    
+    Requires the ``admin`` role.
+    """
+    users = get_collection("users")
+    try:
+        oid = ObjectId(user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format.",
+        )
+        
+    user = await users.find_one({"_id": oid})
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+        
+    return UserResponse.from_doc(user)
+
+
 @router.put("/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
