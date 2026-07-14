@@ -438,7 +438,11 @@ async function loadOrders(page = 1) {
         orders.forEach(function (o) {
             const paymentLabel = o.payment_method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
             const paymentBadge = o.payment_method === 'cash' ? 'badge-success' : 'badge-info';
-            const createdAt = o.created_at ? new Date(o.created_at).toLocaleString('vi-VN') : '—';
+            let createdTime = o.created_at;
+            if (createdTime && !createdTime.endsWith('Z') && !createdTime.includes('+')) {
+                createdTime += 'Z';
+            }
+            const createdAt = createdTime ? new Date(createdTime).toLocaleString('vi-VN') : '—';
 
             html += `
                 <tr>
@@ -503,7 +507,11 @@ async function loadLogs(page = 1) {
         `;
 
         logs.forEach(function (log) {
-            const timestamp = log.created_at ? new Date(log.created_at).toLocaleString('vi-VN') : '—';
+            let timeValue = log.timestamp || log.created_at;
+            if (timeValue && !timeValue.endsWith('Z') && !timeValue.includes('+')) {
+                timeValue += 'Z';
+            }
+            const timestamp = timeValue ? new Date(timeValue).toLocaleString('vi-VN') : '—';
             const levelBadge = log.level === 'error' ? 'badge-error'
                 : log.level === 'warning' ? 'badge-warning'
                 : 'badge-info';

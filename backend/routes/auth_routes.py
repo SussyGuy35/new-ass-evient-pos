@@ -270,17 +270,29 @@ async def delete_user(
 # --------------------------------------------------------------------------
 
 @router.post("/shift/end")
-async def end_shift(current_user: dict = Depends(get_current_user)):
+async def end_shift(request: Request, current_user: dict = Depends(get_current_user)):
     """End the current shift and generate a statistics log."""
     import os
     orders = get_collection("orders")
+    system_logs = get_collection("system_logs")
     
     now = datetime.now(timezone.utc)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Tìm thời điểm kết ca gần nhất của người dùng này
+    last_end = await system_logs.find_one(
+        {"user_id": str(current_user["_id"]), "action": "END_SHIFT"},
+        sort=[("timestamp", -1)]
+    )
+    
+    if last_end:
+        shift_start = last_end["timestamp"]
+    else:
+        # Nếu chưa từng kết ca, lấy từ đầu ngày
+        shift_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
     cursor = orders.find({
         "cashier_id": str(current_user["_id"]),
-        "created_at": {"$gte": day_start}
+        "created_at": {"$gte": shift_start}
     })
     
     docs = await cursor.to_list(length=None)
@@ -298,22 +310,55 @@ async def end_shift(current_user: dict = Depends(get_current_user)):
         else:
             total_transfer += amount
             
-    log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
-    os.makedirs(log_dir, exist_ok=True)
+    # Tìm thời điểm đăng nhập thực sự của ca này
+    login_log = await system_logs.find_one(
+        {
+            "user_id": str(current_user["_id"]),
+            "action": "LOGIN",
+            "timestamp": {"$gte": shift_start}
+        },
+        sort=[("timestamp", 1)]
+    )
+    login_time = login_log["timestamp"] if login_log else shift_start
+    logout_time = now
     
-    safe_username = re.sub(r'[^a-zA-Z0-9_-]', '', current_user['username'])
-    filename = f"shift_{safe_username}_{now.strftime('%Y%m%d_%H%M%S')}.log"
-    filepath = os.path.join(log_dir, filename)
+    if login_time.tzinfo is None:
+        login_time = login_time.replace(tzinfo=timezone.utc)
+    login_time_local = login_time.astimezone()
     
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(f"SHIFT REPORT - {now.strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
-        f.write(f"Cashier: {current_user.get('full_name', current_user['username'])} ({current_user['username']})\n")
-        f.write("-" * 40 + "\n")
-        f.write(f"Total Orders: {total_orders}\n")
-        f.write(f"Total Revenue: {total_revenue:,.0f} VND\n")
-        f.write(f" - Cash: {total_cash:,.0f} VND\n")
-        f.write(f" - Transfer: {total_transfer:,.0f} VND\n")
-        f.write("-" * 40 + "\n")
-        f.write("Shift ended successfully.\n")
+    if logout_time.tzinfo is None:
+        logout_time = logout_time.replace(tzinfo=timezone.utc)
+    logout_time_local = logout_time.astimezone()
+    
+    filename = None
+    if total_orders > 0:
+        log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        
+        safe_username = re.sub(r'[^a-zA-Z0-9_-]', '', current_user['username'])
+        filename = f"shift_{safe_username}_{logout_time_local.strftime('%Y%m%d_%H%M%S')}.log"
+        filepath = os.path.join(log_dir, filename)
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(f"SHIFT REPORT\n")
+            f.write(f"Cashier: {current_user.get('full_name', current_user['username'])} ({current_user['username']})\n")
+            f.write(f"Login Time:  {login_time_local.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Logout Time: {logout_time_local.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("-" * 40 + "\n")
+            f.write(f"Total Orders: {total_orders}\n")
+            f.write(f"Total Revenue: {total_revenue:,.0f} VND\n")
+            f.write(f" - Cash: {total_cash:,.0f} VND\n")
+            f.write(f" - Transfer: {total_transfer:,.0f} VND\n")
+            f.write("-" * 40 + "\n")
+            f.write("Shift ended successfully.\n")
+            
+    client_ip = request.client.host if request.client else ""
+    await log_action(
+        action="END_SHIFT",
+        user_id=str(current_user["_id"]),
+        username=current_user["username"],
+        details=f"Ended shift. Orders: {total_orders}, Revenue: {total_revenue:,.0f} VND",
+        ip_address=client_ip
+    )
         
     return {"message": "Shift ended", "log_file": filename}

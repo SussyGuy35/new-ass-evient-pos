@@ -87,7 +87,7 @@ async def get_invoice_png(
     # ------------------------------------------------------------------
     # Header
     # ------------------------------------------------------------------
-    draw.text((WIDTH // 2 - 50, y), "EViENT POS", fill="black", font=font)
+    draw.text((WIDTH // 2 - 67, y), "THE NEW EViENT POS", fill="black", font=font)
     y += LINE_HEIGHT + 5
 
     draw.line([(MARGIN, y), (WIDTH - MARGIN, y)], fill="black", width=1)
@@ -101,7 +101,8 @@ async def get_invoice_png(
     if created_at:
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
-        date_str = created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        created_at_local = created_at.astimezone()
+        date_str = created_at_local.strftime("%Y-%m-%d %H:%M:%S")
     else:
         date_str = "N/A"
     draw.text((MARGIN, y), f"Date: {date_str}", fill="black", font=font)
@@ -178,7 +179,7 @@ async def get_invoice_png(
     draw.line([(MARGIN, y), (WIDTH - MARGIN, y)], fill="gray", width=1)
     y += 10
     draw.text(
-        (WIDTH // 2 - 60, y),
+        (WIDTH // 2 - 70, y),
         "Cảm ơn bạn và hẹn gặp lại!",
         fill="gray",
         font=font,
