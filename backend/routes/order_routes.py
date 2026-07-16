@@ -74,7 +74,12 @@ async def create_order(
     payments_list = None
     actual_revenue = total
 
-    if body.payments and len(body.payments) > 0:
+    if payment_method == "split":
+        if not body.payments or len(body.payments) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Thanh toán chia tiền (split) yêu cầu chi tiết thanh toán.",
+            )
         # Split payment
         payments_total = sum(p.amount for p in body.payments)
         if abs(payments_total - total) > 1:
@@ -207,7 +212,7 @@ async def list_orders(
             query_filter["created_at"] = {"$gte": day_start, "$lte": day_end}
         except ValueError:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Invalid date format. Use YYYY-MM-DD.",
             )
 

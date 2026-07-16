@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -123,14 +123,14 @@ class OrderItem(BaseModel):
 
 class PaymentSplit(BaseModel):
     """A single payment split for split-payment orders."""
-    method: str
+    method: Literal["cash", "transfer"]
     amount: float = Field(..., ge=0)
 
 
 class OrderCreate(BaseModel):
     """Schema for creating a new order (list of items + payment method)."""
     items: list[OrderItem] = Field(..., min_length=1)
-    payment_method: str = Field(default="cash")
+    payment_method: Literal["cash", "transfer", "split"] = Field(default="cash")
     payments: Optional[list[PaymentSplit]] = None
     amount_given: Optional[float] = None
     expected_change: Optional[float] = None

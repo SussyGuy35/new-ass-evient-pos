@@ -308,12 +308,29 @@ async def end_shift(request: Request, current_user: dict = Depends(get_current_u
     
     now = datetime.now(timezone.utc)
     
+    # Tìm thời điểm đăng nhập gần nhất
+    last_login = await system_logs.find_one(
+        {"user_id": str(current_user["_id"]), "action": "LOGIN"},
+        sort=[("timestamp", -1)]
+    )
+    if not last_login:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No login record found for this user.",
+        )
+
     # Tìm thời điểm kết ca gần nhất của người dùng này
     last_end = await system_logs.find_one(
         {"user_id": str(current_user["_id"]), "action": "END_SHIFT"},
         sort=[("timestamp", -1)]
     )
     
+    if last_end and last_end["timestamp"] > last_login["timestamp"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Shift already ended for the current login session.",
+        )
+
     if last_end:
         shift_start = last_end["timestamp"]
     else:
