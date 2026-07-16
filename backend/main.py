@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from config import settings
 from database import close_db, connect_db
 from routes.auth_routes import router as auth_router
+from routes.drawer_routes import router as drawer_router
 from routes.hardware_routes import router as hardware_router
 from routes.invoice_routes import router as invoice_router
 from routes.log_routes import router as log_router
@@ -72,6 +73,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(product_router, prefix="/api")
+app.include_router(drawer_router, prefix="/api")
 app.include_router(order_router, prefix="/api")
 app.include_router(invoice_router, prefix="/api")
 app.include_router(log_router, prefix="/api")

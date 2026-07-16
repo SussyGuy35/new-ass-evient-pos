@@ -2,7 +2,7 @@
 EViENT POS - Pydantic Models
 
 Defines request / response schemas for every resource in the system:
-Users, Products, Orders, System Logs, and paginated wrappers.
+Users, Products, Orders, Shifts, System Logs, and paginated wrappers.
 """
 
 from __future__ import annotations
@@ -121,10 +121,17 @@ class OrderItem(BaseModel):
     quantity: int = Field(..., ge=1)
 
 
+class PaymentSplit(BaseModel):
+    """A single payment split for split-payment orders."""
+    method: str
+    amount: float = Field(..., ge=0)
+
+
 class OrderCreate(BaseModel):
     """Schema for creating a new order (list of items + payment method)."""
     items: list[OrderItem] = Field(..., min_length=1)
     payment_method: str = Field(default="cash")
+    payments: Optional[list[PaymentSplit]] = None
     amount_given: Optional[float] = None
     expected_change: Optional[float] = None
     actual_change: Optional[float] = None
@@ -141,8 +148,9 @@ class OrderResponse(BaseModel):
     vat_rate: Optional[float] = None
     vat_amount: Optional[float] = None
     total: float
-    actual_revenue: float
+    actual_revenue: Optional[float] = None
     payment_method: str
+    payments: Optional[list[dict]] = None
     amount_given: Optional[float] = None
     expected_change: Optional[float] = None
     actual_change: Optional[float] = None
@@ -156,6 +164,9 @@ class OrderResponse(BaseModel):
         doc = dict(doc)
         doc["id"] = str(doc.pop("_id"))
         return cls(**doc)
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -210,3 +221,39 @@ class PaginatedResponse(BaseModel):
             per_page=per_page,
             total_pages=math.ceil(total / per_page) if per_page > 0 else 0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Drawer models
+# ---------------------------------------------------------------------------
+
+class DrawerTransactionCreate(BaseModel):
+    """Schema for manual drawer transactions."""
+    amount: float = Field(..., description="Amount. Positive for deposit, negative for withdrawal")
+    type: str = Field(..., pattern="^(pay_in|pay_out|sale|refund)$")
+    note: Optional[str] = None
+
+
+class DrawerTransactionResponse(BaseModel):
+    """Public representation of a drawer transaction."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    amount: float
+    type: str
+    note: Optional[str]
+    user_id: str
+    username: str
+    created_at: datetime
+
+    @classmethod
+    def from_doc(cls, doc: dict) -> "DrawerTransactionResponse":
+        doc = dict(doc)
+        doc["id"] = str(doc.pop("_id"))
+        return cls(**doc)
+
+
+class DrawerStateResponse(BaseModel):
+    """Public representation of the current drawer state."""
+    balance: float
+    last_updated: datetime

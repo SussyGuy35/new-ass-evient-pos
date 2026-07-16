@@ -66,6 +66,9 @@ async def get_invoice_png(
     FOOTER_HEIGHT = 100
     if order.get("payment_method") == "cash" and order.get("amount_given") is not None:
         FOOTER_HEIGHT += 40
+    payments = order.get("payments")
+    if order.get("payment_method") == "split" and payments:
+        FOOTER_HEIGHT += len(payments) * 20 + 20
 
     items = order.get("items", [])
     num_items = len(items)
@@ -175,8 +178,19 @@ async def get_invoice_png(
     y += LINE_HEIGHT
 
     payment = order.get("payment_method", "cash").upper()
-    draw.text((MARGIN, y), f"Payment: {payment}", fill="black", font=font)
-    y += LINE_HEIGHT
+    payments = order.get("payments")
+
+    if payment == "SPLIT" and payments:
+        draw.text((MARGIN, y), "Payment: SPLIT", fill="black", font=font)
+        y += LINE_HEIGHT
+        for p in payments:
+            method_label = p.get("method", "").upper()
+            amount = p.get("amount", 0)
+            draw.text((MARGIN + 10, y), f"- {method_label}: {_format_currency(amount)}", fill="black", font=font)
+            y += LINE_HEIGHT
+    else:
+        draw.text((MARGIN, y), f"Payment: {payment}", fill="black", font=font)
+        y += LINE_HEIGHT
     
     amount_given = order.get("amount_given")
     actual_change = order.get("actual_change")

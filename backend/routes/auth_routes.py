@@ -294,13 +294,15 @@ async def delete_user(
     return {"message": "User deleted successfully."}
 
 # --------------------------------------------------------------------------
-# End Shift
+# End Shift (Generate Log)
 # --------------------------------------------------------------------------
 
 @router.post("/shift/end")
 async def end_shift(request: Request, current_user: dict = Depends(get_current_user)):
     """End the current shift and generate a statistics log."""
     import os
+    import re
+    from database import get_collection
     orders = get_collection("orders")
     system_logs = get_collection("system_logs")
     
@@ -332,9 +334,17 @@ async def end_shift(request: Request, current_user: dict = Depends(get_current_u
     
     for doc in docs:
         amount = doc.get("total", 0)
+        method = doc.get("payment_method")
         total_revenue += amount
-        if doc.get("payment_method") == "cash":
+        if method == "cash":
             total_cash += amount
+        elif method == "split":
+            payments = doc.get("payments", [])
+            for p in payments:
+                if p.get("method") == "cash":
+                    total_cash += p.get("amount", 0)
+                else:
+                    total_transfer += p.get("amount", 0)
         else:
             total_transfer += amount
             

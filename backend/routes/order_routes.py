@@ -66,8 +66,26 @@ async def create_order(
     total = subtotal + vat_amount
     order_number = await _generate_order_number()
 
+
+
+    # --- Payment logic ---
+    user_id = str(current_user["_id"])
+    payment_method = body.payment_method
+    payments_list = None
     actual_revenue = total
-    if body.payment_method == "cash" and body.amount_given is not None and body.actual_change is not None:
+
+    if body.payments and len(body.payments) > 0:
+        # Split payment
+        payments_total = sum(p.amount for p in body.payments)
+        if abs(payments_total - total) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Tổng các khoản thanh toán ({payments_total:,.0f}) không khớp với tổng đơn ({total:,.0f}).",
+            )
+        payment_method = "split"
+        payments_list = [p.model_dump() for p in body.payments]
+        actual_revenue = total
+    elif payment_method == "cash" and body.amount_given is not None and body.actual_change is not None:
         actual_revenue = body.amount_given - body.actual_change
 
     doc = {
@@ -78,11 +96,12 @@ async def create_order(
         "vat_amount": round(vat_amount, 2),
         "total": round(total, 2),
         "actual_revenue": round(actual_revenue, 2),
-        "payment_method": body.payment_method,
+        "payment_method": payment_method,
+        "payments": payments_list,
         "amount_given": body.amount_given,
         "expected_change": body.expected_change,
         "actual_change": body.actual_change,
-        "cashier_id": str(current_user["_id"]),
+        "cashier_id": user_id,
         "cashier_name": current_user.get("full_name", current_user["username"]),
         "created_at": datetime.now(timezone.utc),
     }
@@ -90,6 +109,36 @@ async def create_order(
     orders = get_collection("orders")
     result = await orders.insert_one(doc)
     doc["_id"] = result.inserted_id
+
+    # Track drawer cash for sales
+    cash_added = 0
+    if payment_method == "cash":
+        cash_added = actual_revenue
+    elif payment_method == "split" and body.payments:
+        for p in body.payments:
+            if p.method == "cash":
+                cash_added += p.amount
+                
+    if cash_added > 0:
+        drawer_state = get_collection("drawer_state")
+        now = datetime.now(timezone.utc)
+        await drawer_state.find_one_and_update(
+            {"_id": "main_drawer"},
+            {
+                "$inc": {"balance": cash_added},
+                "$set": {"last_updated": now}
+            },
+            upsert=True
+        )
+        transactions = get_collection("drawer_transactions")
+        await transactions.insert_one({
+            "amount": cash_added,
+            "type": "sale",
+            "note": f"Order {order_number}",
+            "user_id": str(current_user["_id"]),
+            "username": current_user["username"],
+            "created_at": now
+        })
 
     # Deduct stock for each product
     products_col = get_collection("products")

@@ -17,22 +17,38 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
     day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     day_start = day_start_local.astimezone(timezone.utc)
     
-    # Aggregation for all-time stats and payment method
-    pipeline_all = [
+    # Aggregation for standard payment methods
+    pipeline_standard = [
+        {"$match": {"payment_method": {"$ne": "split"}}},
         {"$group": {
             "_id": "$payment_method",
             "total_revenue": {"$sum": {"$ifNull": ["$actual_revenue", "$total"]}},
             "total_orders": {"$sum": 1}
         }}
     ]
-    all_time_docs = await orders.aggregate(pipeline_all).to_list(None)
+    standard_docs = await orders.aggregate(pipeline_standard).to_list(None)
+    
+    # Aggregation for split payments
+    pipeline_split = [
+        {"$match": {"payment_method": "split"}},
+        {"$unwind": "$payments"},
+        {"$group": {
+            "_id": "$payments.method",
+            "total_revenue": {"$sum": "$payments.amount"},
+            "total_orders": {"$sum": 0} # We don't want to double count orders here
+        }}
+    ]
+    split_docs = await orders.aggregate(pipeline_split).to_list(None)
+
+    # Count total split orders separately
+    split_orders_count = await orders.count_documents({"payment_method": "split"})
     
     total_revenue_all = 0
-    total_orders_all = 0
+    total_orders_all = split_orders_count
     cash_revenue = 0
     transfer_revenue = 0
     
-    for doc in all_time_docs:
+    for doc in standard_docs + split_docs:
         amount = doc.get("total_revenue", 0)
         count = doc.get("total_orders", 0)
         total_revenue_all += amount
@@ -40,8 +56,10 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
         
         if doc["_id"] == "cash":
             cash_revenue += amount
-        else:
+        elif doc["_id"] == "bank_transfer":
             transfer_revenue += amount
+        else:
+            transfer_revenue += amount # Default non-cash to transfer for legacy data
 
     # Aggregation for today's stats
     pipeline_today = [

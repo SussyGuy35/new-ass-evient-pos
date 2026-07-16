@@ -42,6 +42,7 @@ function switchTab(tabName) {
         case 'orders':
             loadOrders();
             break;
+
         case 'logs':
             loadLogs();
             break;
@@ -696,20 +697,14 @@ function initAdmin() {
         });
     }
 
-    // End Shift button
-    const endShiftBtn = document.getElementById('btn-end-shift');
-    if (endShiftBtn) {
-        endShiftBtn.addEventListener('click', async function () {
-            if (confirm('Bạn có chắc muốn kết thúc ca làm và đăng xuất?')) {
-                try {
-                    await api.post('/auth/shift/end');
-                    showToast('Đã lưu log ca làm. Đang đăng xuất...', 'success');
-                    setTimeout(() => {
-                        auth.logout();
-                    }, 1000);
-                } catch (err) {
-                    showToast('Lỗi khi kết thúc ca: ' + err.message, 'error');
-                }
+    // Shift Management button
+    const shiftBtn = document.getElementById('btn-shift');
+    if (shiftBtn) {
+        shiftBtn.addEventListener('click', function () {
+            if (typeof manageShift === 'function') {
+                manageShift();
+            } else {
+                showToast('Chức năng quản lý ca chỉ có trên trang POS.', 'warning');
             }
         });
     }

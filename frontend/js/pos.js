@@ -10,7 +10,6 @@ let currentPage = 1;
 let totalPages = 1;
 let searchQuery = '';
 let searchDebounceTimer = null;
-
 // --- Currency Formatter ---
 const currencyFormatter = new Intl.NumberFormat('vi-VN');
 function formatCurrency(amount) {
@@ -313,8 +312,10 @@ function renderCart() {
     // Enable/disable checkout buttons
     const cashBtn = document.getElementById('btn-checkout-cash');
     const bankBtn = document.getElementById('btn-checkout-bank');
+    const splitBtn = document.getElementById('btn-checkout-split');
     if (cashBtn) cashBtn.disabled = cart.length === 0;
     if (bankBtn) bankBtn.disabled = cart.length === 0;
+    if (splitBtn) splitBtn.disabled = cart.length === 0;
 }
 
 // --- Checkout Flow ---
@@ -362,6 +363,63 @@ function showCheckoutModal(paymentMethod) {
                 </button>
             </div>
         `;
+    } else if (paymentMethod === 'split') {
+        window._splitFields = {
+            'split-cash': String(total),
+            'split-transfer': "0"
+        };
+        window._splitActiveField = 'split-cash';
+        
+        body.innerHTML = `
+            <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Tách Bill (Tiền Mặt & Chuyển Khoản)</h3>
+            <div style="margin-bottom: 1rem; text-align: left;">
+                <label class="form-label">Tổng tiền (VNĐ)</label>
+                <div style="font-size: 1.25rem; color: #3B82F6; font-weight: bold;">${formatCurrency(total)}</div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div style="text-align: left;">
+                    <label class="form-label text-success">Tiền Mặt</label>
+                    <input type="text" id="split-cash" class="form-input split-numpad-field" style="font-size: 1.125rem; font-weight: bold; caret-color: transparent;" value="${formatCurrency(total)}" readonly inputmode="none" autocomplete="off">
+                </div>
+                <div style="text-align: left;">
+                    <label class="form-label text-primary">Chuyển Khoản</label>
+                    <input type="text" id="split-transfer" class="form-input split-numpad-field" style="font-size: 1.125rem; font-weight: bold; caret-color: transparent;" value="0 đ" readonly inputmode="none" autocomplete="off">
+                </div>
+            </div>
+            <div class="numpad-grid" style="margin-top: 1rem;">
+                <button class="numpad-btn" onclick="splitNumpadPress('1')">1</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('2')">2</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('3')">3</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('4')">4</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('5')">5</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('6')">6</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('7')">7</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('8')">8</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('9')">9</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('C')" style="color: #EF4444;">C</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('0')">0</button>
+                <button class="numpad-btn" onclick="splitNumpadPress('000')">000</button>
+            </div>
+            <div id="split-warning" style="color: #EF4444; font-size: 0.875rem; margin-top: 0.5rem; text-align: center; height: 1.25rem;"></div>
+            <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.5rem;">
+                <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
+                <button class="btn bg-purple-600 hover:bg-purple-500 text-white" onclick="submitSplitCheckout(${total})" id="btn-confirm-split">
+                    Xác nhận Tách Bill
+                </button>
+            </div>
+        `;
+
+        // Focus tracking for split inputs
+        document.querySelectorAll('.split-numpad-field').forEach(function(el) {
+            el.addEventListener('focus', function() {
+                document.querySelectorAll('.split-numpad-field').forEach(function(f) {
+                    f.style.borderColor = '';
+                });
+                el.style.borderColor = '#3B82F6';
+                window._splitActiveField = el.id;
+            });
+        });
+        overlay.addEventListener('keydown', splitKeydownHandler);
     } else {
         window._cashFields = {
             'cash-amount-given': "0",
@@ -521,13 +579,159 @@ window.submitCashCheckout = function(total) {
 };
 
 
+function splitKeydownHandler(e) {
+    if (!window._splitFields) return;
+    var key = e.key;
+    if (key >= '0' && key <= '9') {
+        e.preventDefault();
+        splitNumpadPress(key);
+    } else if (key === 'Backspace') {
+        e.preventDefault();
+        splitNumpadPress('BACK');
+    } else if (key === 'Delete' || key === 'Escape') {
+        e.preventDefault();
+        splitNumpadPress('C');
+    } else if (key === 'Tab') {
+        e.preventDefault();
+        var nextField = window._splitActiveField === 'split-cash'
+            ? 'split-transfer' : 'split-cash';
+        var nextEl = document.getElementById(nextField);
+        if (nextEl) nextEl.focus();
+    } else if (key === 'Enter') {
+        e.preventDefault();
+        var btn = document.getElementById('btn-confirm-split');
+        if (btn) btn.click();
+    } else {
+        e.preventDefault();
+    }
+}
+
+function splitRefreshDisplay() {
+    var cashRaw = window._splitFields['split-cash'] || "0";
+    var transferRaw = window._splitFields['split-transfer'] || "0";
+    var cashVal = parseInt(cashRaw, 10);
+    var transferVal = parseInt(transferRaw, 10);
+
+    var subtotal = calculateTotal();
+    var vatRate = APP_CONFIG.VAT_RATE || 0;
+    var total = subtotal + (subtotal * (vatRate / 100));
+
+    // Auto-sync the other field to sum up to total
+    if (window._splitActiveField === 'split-cash') {
+        transferVal = total - cashVal;
+        if (transferVal < 0) transferVal = 0;
+        window._splitFields['split-transfer'] = String(Math.round(transferVal));
+    } else {
+        cashVal = total - transferVal;
+        if (cashVal < 0) cashVal = 0;
+        window._splitFields['split-cash'] = String(Math.round(cashVal));
+    }
+
+    var cashInput = document.getElementById('split-cash');
+    if (cashInput) cashInput.value = formatCurrency(cashVal);
+
+    var transferInput = document.getElementById('split-transfer');
+    if (transferInput) transferInput.value = formatCurrency(transferVal);
+
+    var warning = document.getElementById('split-warning');
+    if (warning) {
+        if (cashVal + transferVal !== total) {
+            warning.textContent = `Tổng (${formatCurrency(cashVal + transferVal)}) khác số tiền đơn hàng (${formatCurrency(total)})!`;
+        } else {
+            warning.textContent = '';
+        }
+    }
+}
+
+window.splitNumpadPress = function(key) {
+    var fieldId = window._splitActiveField || 'split-cash';
+    var raw = window._splitFields[fieldId] || "0";
+    if (key === 'C') {
+        raw = "0";
+    } else if (key === 'BACK') {
+        raw = raw.slice(0, -1);
+        if (!raw) raw = "0";
+    } else {
+        if (raw === "0") {
+            raw = key;
+        } else {
+            raw += key;
+        }
+    }
+    window._splitFields[fieldId] = raw;
+    splitRefreshDisplay();
+};
+
+window.submitSplitCheckout = function(total) {
+    var cashVal = parseInt(window._splitFields['split-cash'] || "0", 10);
+    var transferVal = parseInt(window._splitFields['split-transfer'] || "0", 10);
+    
+    if (cashVal + transferVal !== total) {
+        showToast('Tổng số tiền tách bill không khớp với đơn hàng!', 'error');
+        return;
+    }
+
+    if (transferVal > 0) {
+        // Show QR code for the transfer portion
+        showSplitQRModal(cashVal, transferVal);
+    } else {
+        // Only cash
+        completeCheckout('split', cashVal, transferVal, 0);
+    }
+};
+
+function showSplitQRModal(cashVal, transferVal) {
+    const body = document.getElementById('checkout-modal-body');
+    if (!body) return;
+
+    const bankId = APP_CONFIG.VIETQR_BANK_ID || '970436';
+    const accNo = APP_CONFIG.VIETQR_ACCOUNT_NO || '';
+    const rawAccName = APP_CONFIG.VIETQR_ACCOUNT_NAME || '';
+    const accName = encodeURIComponent(rawAccName);
+    
+    // Tạo lời nhắn chuyển khoản ngẫu nhiên (5 số)
+    const randomCode = Math.floor(10000 + Math.random() * 90000);
+    const transferMessage = `EViENT-ORDER-${randomCode}`;
+    const addInfo = encodeURIComponent(transferMessage);
+
+    // Standard VietQR URL format
+    const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-compact.png?amount=${transferVal}&accountName=${accName}&addInfo=${addInfo}`;
+
+    body.innerHTML = `
+        <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Quét Mã Thanh Toán (Phần Chuyển Khoản)</h3>
+        <div style="background: white; padding: 1rem; border-radius: 0.5rem; display: inline-block; margin-bottom: 1rem;">
+            <img src="${qrUrl}" alt="VietQR" style="max-width: 100%; height: auto; width: 250px;">
+        </div>
+        <div style="font-size: 1.125rem; color: #3B82F6; font-weight: 700; margin-bottom: 0.5rem;">
+            Số tiền chuyển: ${formatCurrency(transferVal)}
+        </div>
+        <div style="font-size: 1.125rem; color: #10B981; font-weight: 700; margin-bottom: 0.5rem;">
+            Tiền mặt cần thu: ${formatCurrency(cashVal)}
+        </div>
+        <div style="font-size: 0.875rem; color: #E2E8F0; margin-bottom: 0.25rem; font-weight: 600;">
+            ${escapeHtml(rawAccName)}
+        </div>
+        <div style="font-size: 0.875rem; color: #94A3B8; margin-bottom: 1.5rem;">
+            Nội dung: <span style="color: #10B981; font-weight: bold;">${transferMessage}</span>
+        </div>
+        <div style="display: flex; gap: 0.75rem; justify-content: center;">
+            <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
+            <button class="btn btn-primary" onclick="completeCheckout('split', ${cashVal}, ${transferVal}, 0)" id="btn-confirm-transfer">
+                Xác nhận đã nhận tiền
+            </button>
+        </div>
+    `;
+}
+
 function closeCheckoutModal() {
     var overlay = document.getElementById('checkout-modal-overlay');
     if (overlay) {
         overlay.removeEventListener('keydown', cashKeydownHandler);
+        if (typeof splitKeydownHandler !== 'undefined') overlay.removeEventListener('keydown', splitKeydownHandler);
         overlay.classList.remove('active');
     }
     window._cashFields = null;
+    window._splitFields = null;
 }
 
 function downloadInvoice(orderId) {
@@ -595,6 +799,9 @@ async function completeCheckout(paymentMethod, amountGiven, expectedChange, actu
     const confirmCashBtn = document.getElementById('btn-confirm-cash');
     if (confirmCashBtn) confirmCashBtn.disabled = true;
 
+    const confirmSplitBtn = document.getElementById('btn-confirm-split');
+    if (confirmSplitBtn) confirmSplitBtn.disabled = true;
+
     try {
         const orderPayload = {
             items: cart.map(function (item) {
@@ -607,6 +814,21 @@ async function completeCheckout(paymentMethod, amountGiven, expectedChange, actu
             }),
             payment_method: paymentMethod
         };
+        
+        if (paymentMethod === 'cash' && amountGiven !== undefined) {
+            orderPayload.amount_given = amountGiven;
+            orderPayload.expected_change = expectedChange;
+            orderPayload.actual_change = actualChange;
+        } else if (paymentMethod === 'split' && amountGiven && expectedChange) { // Reuse arguments for split details
+            orderPayload.payments = [
+                { method: 'cash', amount: amountGiven },
+                { method: 'bank_transfer', amount: expectedChange }
+            ];
+            // If they give exact amounts, amount_given = cash amount, actual_change = 0
+            orderPayload.amount_given = amountGiven;
+            orderPayload.expected_change = 0;
+            orderPayload.actual_change = 0;
+        }
         
         if (paymentMethod === 'cash' && amountGiven !== undefined) {
             orderPayload.amount_given = amountGiven;
@@ -626,8 +848,8 @@ async function completeCheckout(paymentMethod, amountGiven, expectedChange, actu
         // Reload products to update stock
         await loadProducts(currentPage, searchQuery);
 
-        // Open cash drawer for cash payments
-        if (paymentMethod === 'cash') {
+        // Open cash drawer for cash payments or split payments with cash
+        if (paymentMethod === 'cash' || (paymentMethod === 'split' && amountGiven > 0)) {
             try {
                 await triggerCashDrawer();
             } catch (drawerErr) {
@@ -676,7 +898,7 @@ async function checkout(paymentMethod) {
         const subtotal = calculateTotal();
         const vatRate = APP_CONFIG.VAT_RATE || 0;
         const total = subtotal + (subtotal * (vatRate / 100));
-        if (!confirm(`Xác nhận thanh toán ${formatCurrency(total)} bằng tiền mặt?`)) return;
+        // No confirm needed since we have a dedicated cash modal now.
     }
     
     showCheckoutModal(paymentMethod);
@@ -742,6 +964,13 @@ function setupEventListeners() {
         });
     }
 
+    const splitBtn = document.getElementById('btn-checkout-split');
+    if (splitBtn) {
+        splitBtn.addEventListener('click', function () {
+            checkout('split');
+        });
+    }
+
     // Cash drawer button
     const drawerBtn = document.getElementById('btn-cash-drawer');
     if (drawerBtn) {
@@ -762,10 +991,127 @@ function setupEventListeners() {
                         auth.logout();
                     }, 1000);
                 } catch (err) {
-                    showToast('Lỗi khi kết thúc ca: ' + err.message, 'error');
+                    showToast('Lỗi lưu log ca làm: ' + err.message, 'error');
+                    // Vẫn cho phép logout dù lỗi log
+                    setTimeout(() => {
+                        auth.logout();
+                    }, 1000);
                 }
             }
         });
+    }
+
+    // Manage Drawer button
+    const manageDrawerBtn = document.getElementById('btn-manage-drawer');
+    if (manageDrawerBtn) {
+        manageDrawerBtn.addEventListener('click', function () {
+            showDrawerModal();
+        });
+    }
+}
+
+
+// --- Drawer Management ---
+async function showDrawerModal() {
+    const overlay = document.getElementById('drawer-modal-overlay');
+    const body = document.getElementById('drawer-modal-body');
+    if (!overlay || !body) return;
+
+    body.innerHTML = '<div style="text-align: center; padding: 2rem;"><div class="spinner" style="margin: 0 auto;"></div></div>';
+    overlay.classList.add('active');
+
+    try {
+        const [stateRes, txRes] = await Promise.all([
+            api.get('/drawer'),
+            api.get('/drawer/transactions?page=1&per_page=5')
+        ]);
+
+        const balance = stateRes.balance || 0;
+        const transactions = txRes.items || [];
+
+        let html = `
+            <div style="text-align: center; margin-bottom: 2rem;">
+                <div class="text-sm text-slate-400 mb-1">Số dư hiện tại</div>
+                <div class="text-3xl font-bold text-emerald-400">${formatCurrency(balance)}</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; background: #1E293B; padding: 1.5rem; border-radius: 0.5rem;">
+                <div>
+                    <label class="form-label text-slate-300">Số tiền (VNĐ)</label>
+                    <input type="number" id="drawer-amount" class="form-input" placeholder="VD: 500000" min="0">
+                </div>
+                <div>
+                    <label class="form-label text-slate-300">Ghi chú (Tùy chọn)</label>
+                    <input type="text" id="drawer-note" class="form-input" placeholder="Lý do...">
+                </div>
+                <div style="grid-column: span 2; display: flex; gap: 1rem; justify-content: center; margin-top: 0.5rem;">
+                    <button class="btn btn-success" onclick="submitDrawerTransaction('pay_in')">
+                        <svg class="w-4 h-4 mr-1 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+                        Nạp tiền
+                    </button>
+                    <button class="btn btn-danger" onclick="submitDrawerTransaction('pay_out')">
+                        <svg class="w-4 h-4 mr-1 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15"/></svg>
+                        Rút tiền
+                    </button>
+                </div>
+            </div>
+
+            <h4 class="font-bold text-white mb-2">Giao dịch gần đây</h4>
+            <div style="max-height: 200px; overflow-y: auto;">
+        `;
+
+        if (transactions.length === 0) {
+            html += '<div class="text-slate-400 text-sm text-center py-4">Chưa có giao dịch nào</div>';
+        } else {
+            html += '<table class="w-full text-sm text-left"><tbody class="divide-y divide-slate-700">';
+            transactions.forEach(tx => {
+                const date = new Date(tx.created_at).toLocaleString('vi-VN');
+                const isPos = tx.amount >= 0;
+                const color = isPos ? 'text-emerald-400' : 'text-red-400';
+                const sign = isPos ? '+' : '';
+                const typeText = tx.type === 'pay_in' ? 'Nạp tiền' : tx.type === 'pay_out' ? 'Rút tiền' : tx.type === 'sale' ? 'Bán hàng' : 'Khác';
+                
+                html += `
+                    <tr>
+                        <td class="py-2 text-slate-400">${date}</td>
+                        <td class="py-2 text-slate-300">${typeText} ${tx.note ? '- ' + escapeHtml(tx.note) : ''}</td>
+                        <td class="py-2 text-right font-semibold ${color}">${sign}${formatCurrency(tx.amount)}</td>
+                    </tr>
+                `;
+            });
+            html += '</tbody></table>';
+        }
+
+        html += '</div>';
+        body.innerHTML = html;
+
+    } catch (err) {
+        body.innerHTML = `<div class="empty-state"><p>Lỗi tải két tiền: ${err.message}</p></div>`;
+    }
+}
+
+async function submitDrawerTransaction(type) {
+    const amountInput = document.getElementById('drawer-amount');
+    const noteInput = document.getElementById('drawer-note');
+    if (!amountInput || !noteInput) return;
+
+    const amount = parseInt(amountInput.value, 10);
+    if (!amount || isNaN(amount) || amount <= 0) {
+        showToast('Vui lòng nhập số tiền hợp lệ lớn hơn 0', 'warning');
+        return;
+    }
+
+    try {
+        await api.post('/drawer/transaction', {
+            amount: amount,
+            type: type,
+            note: noteInput.value.trim()
+        });
+        showToast('Đã lưu giao dịch két tiền!', 'success');
+        // Refresh modal
+        showDrawerModal();
+    } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
     }
 }
 
