@@ -39,5 +39,17 @@ async def log_action(
             }
         )
     except Exception as exc:
-        # Logging should never crash the request – fail silently but print.
-        print(f"[LOG ERROR] Failed to write audit log: {exc}")
+        # MongoDB is down – buffer to local SQLite
+        print(f"[LOG] MongoDB unavailable, buffering log locally: {exc}")
+        try:
+            import local_db
+            await local_db.queue_log({
+                "action": action,
+                "user_id": user_id,
+                "username": username,
+                "details": details,
+                "ip_address": ip_address,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as local_exc:
+            print(f"[LOG ERROR] Failed to buffer log locally: {local_exc}")

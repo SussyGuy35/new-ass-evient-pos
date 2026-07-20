@@ -64,9 +64,6 @@ async def create_order(
     vat_rate = settings.VAT_RATE
     vat_amount = subtotal * (vat_rate / 100)
     total = subtotal + vat_amount
-    order_number = await _generate_order_number()
-
-
 
     # --- Payment logic ---
     user_id = str(current_user["_id"])
@@ -93,6 +90,26 @@ async def create_order(
     elif payment_method == "cash" and body.amount_given is not None and body.actual_change is not None:
         actual_revenue = body.amount_given - body.actual_change
 
+    cash_added = 0
+    if payment_method == "cash":
+        cash_added = actual_revenue
+    elif payment_method == "split" and body.payments:
+        for p in body.payments:
+            if p.method == "cash":
+                cash_added += p.amount
+
+    is_offline = False
+    order_number = None
+
+    try:
+        order_number = await _generate_order_number()
+    except Exception:
+        is_offline = True
+
+    if is_offline:
+        import local_db
+        order_number = await local_db.next_offline_order_number()
+
     doc = {
         "order_number": order_number,
         "items": [item.model_dump() for item in body.items],
@@ -111,61 +128,86 @@ async def create_order(
         "created_at": datetime.now(timezone.utc),
     }
 
-    orders = get_collection("orders")
-    result = await orders.insert_one(doc)
-    doc["_id"] = result.inserted_id
-
-    # Track drawer cash for sales
-    cash_added = 0
-    if payment_method == "cash":
-        cash_added = actual_revenue
-    elif payment_method == "split" and body.payments:
-        for p in body.payments:
-            if p.method == "cash":
-                cash_added += p.amount
-                
-    if cash_added > 0:
-        drawer_state = get_collection("drawer_state")
-        now = datetime.now(timezone.utc)
-        await drawer_state.find_one_and_update(
-            {"_id": "main_drawer"},
-            {
-                "$inc": {"balance": cash_added},
-                "$set": {"last_updated": now}
-            },
-            upsert=True
-        )
-        transactions = get_collection("drawer_transactions")
-        await transactions.insert_one({
-            "amount": cash_added,
-            "type": "sale",
-            "note": f"Order {order_number}",
-            "user_id": str(current_user["_id"]),
-            "username": current_user["username"],
-            "created_at": now
-        })
-
-    # Deduct stock for each product
-    products_col = get_collection("products")
-    bulk_ops = []
-    for item in body.items:
+    if is_offline:
+        import local_db
+        await local_db.queue_order(doc)
+        doc["_id"] = ObjectId()
+        if cash_added > 0:
+            await local_db.update_local_drawer_balance(cash_added)
+            await local_db.queue_drawer_tx({
+                "amount": cash_added,
+                "type": "sale",
+                "note": f"Order {order_number} [OFFLINE]",
+                "user_id": str(current_user["_id"]),
+                "username": current_user["username"],
+                "created_at": doc["created_at"]
+            })
+        for item in body.items:
+            await local_db.deduct_cached_stock(item.product_id, item.quantity)
+    else:
         try:
-            pid = ObjectId(item.product_id)
-            bulk_ops.append(UpdateOne(
-                {"_id": pid},
-                {"$inc": {"stock": -item.quantity}}
-            ))
-        except Exception:
-            pass
-            
-    if bulk_ops:
-        try:
-            await products_col.bulk_write(bulk_ops)
-        except Exception:
-            # Note: without transactions, this operation is still not fully atomic
-            # but bulk_write minimizes the risk window.
-            pass
+            orders = get_collection("orders")
+            result = await orders.insert_one(doc)
+            doc["_id"] = result.inserted_id
 
+            if cash_added > 0:
+                drawer_state = get_collection("drawer_state")
+                now = datetime.now(timezone.utc)
+                await drawer_state.find_one_and_update(
+                    {"_id": "main_drawer"},
+                    {
+                        "$inc": {"balance": cash_added},
+                        "$set": {"last_updated": now}
+                    },
+                    upsert=True
+                )
+                transactions = get_collection("drawer_transactions")
+                await transactions.insert_one({
+                    "amount": cash_added,
+                    "type": "sale",
+                    "note": f"Order {order_number}",
+                    "user_id": str(current_user["_id"]),
+                    "username": current_user["username"],
+                    "created_at": now
+                })
+
+            products_col = get_collection("products")
+            bulk_ops = []
+            for item in body.items:
+                try:
+                    pid = ObjectId(item.product_id)
+                    bulk_ops.append(UpdateOne(
+                        {"_id": pid},
+                        {"$inc": {"stock": -item.quantity}}
+                    ))
+                except Exception:
+                    pass
+                    
+            if bulk_ops:
+                try:
+                    await products_col.bulk_write(bulk_ops)
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"[OFFLINE] Failed during order write, buffering. {exc}")
+            import local_db
+            await local_db.queue_order(doc)
+            doc["_id"] = ObjectId()
+            if cash_added > 0:
+                await local_db.update_local_drawer_balance(cash_added)
+                await local_db.queue_drawer_tx({
+                    "amount": cash_added,
+                    "type": "sale",
+                    "note": f"Order {order_number} [OFFLINE-FALLBACK]",
+                    "user_id": str(current_user["_id"]),
+                    "username": current_user["username"],
+                    "created_at": doc["created_at"]
+                })
+            for item in body.items:
+                await local_db.deduct_cached_stock(item.product_id, item.quantity)
+            is_offline = True
+
+    # Audit log
     # Audit log
     client_ip = request.client.host if request.client else ""
     await log_action(
@@ -176,7 +218,7 @@ async def create_order(
             f"Created order {order_number} | "
             f"Total: {doc['total']:,.0f} | "
             f"Items: {len(body.items)} | "
-            f"Payment: {body.payment_method}"
+            f"Payment: {body.payment_method}" + (" [OFFLINE]" if is_offline else "")
         ),
         ip_address=client_ip,
     )
@@ -216,19 +258,24 @@ async def list_orders(
                 detail="Invalid date format. Use YYYY-MM-DD.",
             )
 
-    total = await orders.count_documents(query_filter)
-    skip = (page - 1) * per_page
+    try:
+        total = await orders.count_documents(query_filter)
+        skip = (page - 1) * per_page
 
-    cursor = (
-        orders.find(query_filter)
-        .sort("created_at", -1)
-        .skip(skip)
-        .limit(per_page)
-    )
-    docs = await cursor.to_list(length=per_page)
+        cursor = (
+            orders.find(query_filter)
+            .sort("created_at", -1)
+            .skip(skip)
+            .limit(per_page)
+        )
+        docs = await cursor.to_list(length=per_page)
 
-    items = [OrderResponse.from_doc(d).model_dump() for d in docs]
-    return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
+        items = [OrderResponse.from_doc(d).model_dump() for d in docs]
+        return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
+    except Exception:
+        # Offline fallback: just return an empty list or cached pending orders
+        # For simplicity, returning empty list as order history isn't critical offline
+        return PaginatedResponse.build(items=[], total=0, page=page, per_page=per_page)
 
 
 # --------------------------------------------------------------------------
@@ -251,11 +298,18 @@ async def get_order(
             detail="Invalid order ID format.",
         )
 
-    doc = await orders.find_one({"_id": oid})
-    if doc is None:
+    try:
+        doc = await orders.find_one({"_id": oid})
+        if doc is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found.",
+            )
+        return OrderResponse.from_doc(doc)
+    except HTTPException:
+        raise
+    except Exception:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Order lookup unavailable while offline.",
         )
-
-    return OrderResponse.from_doc(doc)

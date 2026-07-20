@@ -8,3 +8,5 @@ pillow
 python-multipart
 pydantic[email]
 pyserial==3.5
+aiosqlite
+python-escpos

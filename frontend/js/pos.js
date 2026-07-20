@@ -343,24 +343,26 @@ function showCheckoutModal(paymentMethod) {
         const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-compact.png?amount=${total}&accountName=${accName}&addInfo=${addInfo}`;
 
         body.innerHTML = `
-            <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Quét Mã Thanh Toán</h3>
-            <div style="background: white; padding: 1rem; border-radius: 0.5rem; display: inline-block; margin-bottom: 1rem;">
-                <img src="${qrUrl}" alt="VietQR" style="max-width: 100%; height: auto; width: 250px;">
-            </div>
-            <div style="font-size: 1.125rem; color: #3B82F6; font-weight: 700; margin-bottom: 0.5rem;">
-                Số tiền: ${formatCurrency(total)}
-            </div>
-            <div style="font-size: 0.875rem; color: #E2E8F0; margin-bottom: 0.25rem; font-weight: 600;">
-                ${escapeHtml(rawAccName)}
-            </div>
-            <div style="font-size: 0.875rem; color: #94A3B8; margin-bottom: 1.5rem;">
-                Nội dung: <span style="color: #10B981; font-weight: bold;">${transferMessage}</span>
-            </div>
-            <div style="display: flex; gap: 0.75rem; justify-content: center;">
-                <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
-                <button class="btn btn-primary" onclick="completeCheckout('bank_transfer')" id="btn-confirm-transfer">
-                    Xác nhận đã nhận tiền
-                </button>
+            <div style="text-align: center;">
+                <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Quét Mã Thanh Toán</h3>
+                <div style="background: white; padding: 1rem; border-radius: 0.5rem; display: inline-block; margin-bottom: 1rem;">
+                    <img src="${qrUrl}" alt="VietQR" style="max-width: 100%; height: auto; width: 250px;">
+                </div>
+                <div style="font-size: 1.125rem; color: #3B82F6; font-weight: 700; margin-bottom: 0.5rem;">
+                    Số tiền: ${formatCurrency(total)}
+                </div>
+                <div style="font-size: 0.875rem; color: #E2E8F0; margin-bottom: 0.25rem; font-weight: 600;">
+                    ${escapeHtml(rawAccName)}
+                </div>
+                <div style="font-size: 0.875rem; color: #94A3B8; margin-bottom: 1.5rem;">
+                    Nội dung: <span style="color: #10B981; font-weight: bold;">${transferMessage}</span>
+                </div>
+                <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                    <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
+                    <button class="btn btn-primary" onclick="completeCheckout('transfer')" id="btn-confirm-transfer">
+                        Xác nhận đã nhận tiền
+                    </button>
+                </div>
             </div>
         `;
     } else if (paymentMethod === 'split') {
@@ -698,27 +700,29 @@ function showSplitQRModal(cashVal, transferVal) {
     const qrUrl = `https://img.vietqr.io/image/${bankId}-${accNo}-compact.png?amount=${transferVal}&accountName=${accName}&addInfo=${addInfo}`;
 
     body.innerHTML = `
-        <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Quét Mã Thanh Toán (Phần Chuyển Khoản)</h3>
-        <div style="background: white; padding: 1rem; border-radius: 0.5rem; display: inline-block; margin-bottom: 1rem;">
-            <img src="${qrUrl}" alt="VietQR" style="max-width: 100%; height: auto; width: 250px;">
-        </div>
-        <div style="font-size: 1.125rem; color: #3B82F6; font-weight: 700; margin-bottom: 0.5rem;">
-            Số tiền chuyển: ${formatCurrency(transferVal)}
-        </div>
-        <div style="font-size: 1.125rem; color: #10B981; font-weight: 700; margin-bottom: 0.5rem;">
-            Tiền mặt cần thu: ${formatCurrency(cashVal)}
-        </div>
-        <div style="font-size: 0.875rem; color: #E2E8F0; margin-bottom: 0.25rem; font-weight: 600;">
-            ${escapeHtml(rawAccName)}
-        </div>
-        <div style="font-size: 0.875rem; color: #94A3B8; margin-bottom: 1.5rem;">
-            Nội dung: <span style="color: #10B981; font-weight: bold;">${transferMessage}</span>
-        </div>
-        <div style="display: flex; gap: 0.75rem; justify-content: center;">
-            <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
-            <button class="btn btn-primary" onclick="completeCheckout('split', ${cashVal}, ${transferVal}, 0)" id="btn-confirm-transfer">
-                Xác nhận đã nhận tiền
-            </button>
+        <div style="text-align: center;">
+            <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 1rem;">Quét Mã Thanh Toán (Phần Chuyển Khoản)</h3>
+            <div style="background: white; padding: 1rem; border-radius: 0.5rem; display: inline-block; margin-bottom: 1rem;">
+                <img src="${qrUrl}" alt="VietQR" style="max-width: 100%; height: auto; width: 250px;">
+            </div>
+            <div style="font-size: 1.125rem; color: #3B82F6; font-weight: 700; margin-bottom: 0.5rem;">
+                Số tiền chuyển: ${formatCurrency(transferVal)}
+            </div>
+            <div style="font-size: 1.125rem; color: #10B981; font-weight: 700; margin-bottom: 0.5rem;">
+                Tiền mặt cần thu: ${formatCurrency(cashVal)}
+            </div>
+            <div style="font-size: 0.875rem; color: #E2E8F0; margin-bottom: 0.25rem; font-weight: 600;">
+                ${escapeHtml(rawAccName)}
+            </div>
+            <div style="font-size: 0.875rem; color: #94A3B8; margin-bottom: 1.5rem;">
+                Nội dung: <span style="color: #10B981; font-weight: bold;">${transferMessage}</span>
+            </div>
+            <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                <button class="btn btn-ghost" onclick="closeCheckoutModal()">Hủy</button>
+                <button class="btn btn-primary" onclick="completeCheckout('split', ${cashVal}, ${transferVal}, 0)" id="btn-confirm-transfer">
+                    Xác nhận đã nhận tiền
+                </button>
+            </div>
         </div>
     `;
 }
@@ -746,7 +750,7 @@ function downloadInvoice(orderId) {
         modal.innerHTML = `
             <div class="modal-content" style="max-width: 500px; padding: 1.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0;">Hoá đơn #${orderId}</h3>
+                    <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0;">Hoá đơn</h3>
                     <button class="btn btn-ghost" style="padding: 0.5rem;" onclick="document.getElementById('invoice-modal-overlay').classList.remove('active')">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
@@ -755,22 +759,41 @@ function downloadInvoice(orderId) {
                     <img id="invoice-image" src="" alt="Invoice" style="max-width: 100%; display: block; margin: 0 auto;">
                 </div>
                 <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: center;">
-                    <button class="btn btn-primary" onclick="printInvoiceImage()">
+                    <button class="btn btn-success" onclick="printThermalReceipt(document.getElementById('invoice-modal-overlay').dataset.orderId)">
                         <svg class="w-4 h-4 mr-2 inline-block -mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-                        In Hoá Đơn
+                        In hoá đơn
+                    </button>
+                    <button class="btn btn-primary" onclick="printInvoiceImage()">
+                        <svg class="w-4 h-4 mr-2 inline-block -mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Tải / In Ảnh
                     </button>
                     <button class="btn btn-ghost" onclick="document.getElementById('invoice-modal-overlay').classList.remove('active')">Đóng</button>
                 </div>
             </div>
         `;
         document.body.appendChild(modal);
-    } else {
-        const title = modal.querySelector('h3');
-        if (title) title.textContent = `Hoá đơn #${orderId}`;
     }
+    
+    modal.dataset.orderId = orderId;
+    const title = modal.querySelector('h3');
+    if (title) title.textContent = `Hoá đơn #${orderId}`;
     
     document.getElementById('invoice-image').src = url;
     modal.classList.add('active');
+}
+
+async function printThermalReceipt(orderId) {
+    if (!orderId) return;
+    try {
+        const res = await apiCall(`/hardware/print_receipt/${orderId}`, { method: 'POST' });
+        if (res.success) {
+            showToast('Đã gửi lệnh in thành công!', 'success');
+        } else {
+            showToast('Lỗi: ' + (res.detail || res.message), 'error');
+        }
+    } catch (e) {
+        showToast('Lỗi kết nối máy in', 'error');
+    }
 }
 
 function printInvoiceImage() {
@@ -822,7 +845,7 @@ async function completeCheckout(paymentMethod, amountGiven, expectedChange, actu
         } else if (paymentMethod === 'split' && amountGiven && expectedChange) { // Reuse arguments for split details
             orderPayload.payments = [
                 { method: 'cash', amount: amountGiven },
-                { method: 'bank_transfer', amount: expectedChange }
+                { method: 'transfer', amount: expectedChange }
             ];
             // If they give exact amounts, amount_given = cash amount, actual_change = 0
             orderPayload.amount_given = amountGiven;

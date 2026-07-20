@@ -9,6 +9,7 @@ Wires up:
     * Root redirect to ``/index.html``
 """
 
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -38,9 +39,33 @@ from seed import seed_admin
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: connect to DB and seed on startup, close on shutdown."""
+    import local_db
+    import sync_engine
+
+    # 1. Connect MongoDB
     await connect_db()
     await seed_admin()
+
+    # 2. Init local SQLite cache
+    await local_db.init_db()
+
+    # 3. Initial sync: pull products/users from MongoDB into SQLite
+    online = await sync_engine.check_online()
+    if online:
+        await sync_engine.sync_remote_to_local()
+
+    # 4. Start background sync loop
+    sync_task = asyncio.create_task(sync_engine.start_sync_loop())
+
     yield
+
+    # Shutdown
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        pass
+    await local_db.close_db()
     await close_db()
 
 

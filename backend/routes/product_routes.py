@@ -44,32 +44,39 @@ async def list_products(
 
     The ``q`` query parameter performs a case-insensitive search against
     the product name **or** barcode.
+    Falls back to local SQLite cache if MongoDB is unreachable.
     """
-    products = get_collection("products")
+    try:
+        products = get_collection("products")
 
-    query_filter: dict = {}
-    if q:
-        safe_q = re.escape(q)
-        query_filter = {
-            "$or": [
-                {"name": {"$regex": safe_q, "$options": "i"}},
-                {"barcode": {"$regex": safe_q, "$options": "i"}},
-            ]
-        }
+        query_filter: dict = {}
+        if q:
+            safe_q = re.escape(q)
+            query_filter = {
+                "$or": [
+                    {"name": {"$regex": safe_q, "$options": "i"}},
+                    {"barcode": {"$regex": safe_q, "$options": "i"}},
+                ]
+            }
 
-    total = await products.count_documents(query_filter)
-    skip = (page - 1) * per_page
+        total = await products.count_documents(query_filter)
+        skip = (page - 1) * per_page
 
-    cursor = (
-        products.find(query_filter)
-        .sort("created_at", -1)
-        .skip(skip)
-        .limit(per_page)
-    )
-    docs = await cursor.to_list(length=per_page)
+        cursor = (
+            products.find(query_filter)
+            .sort("created_at", -1)
+            .skip(skip)
+            .limit(per_page)
+        )
+        docs = await cursor.to_list(length=per_page)
 
-    items = [ProductResponse.from_doc(d).model_dump() for d in docs]
-    return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
+        items = [ProductResponse.from_doc(d).model_dump() for d in docs]
+        return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
+    except Exception:
+        # Offline fallback → read from SQLite cache
+        import local_db
+        cached_items, total = await local_db.get_cached_products(page, per_page, q)
+        return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
 
 
 # --------------------------------------------------------------------------
@@ -82,10 +89,19 @@ async def get_product_by_barcode(
     current_user: dict = Depends(get_current_user),
 ):
     """Find a single product by its exact barcode."""
-    products = get_collection("products")
-    doc = await products.find_one({"barcode": barcode})
+    doc = None
+    try:
+        products = get_collection("products")
+        doc = await products.find_one({"barcode": barcode})
+    except Exception:
+        pass  # Offline – try cache below
 
     if doc is None:
+        # Offline fallback
+        import local_db
+        cached = await local_db.get_cached_product_by_barcode(barcode)
+        if cached:
+            return cached
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with barcode '{barcode}' not found.",

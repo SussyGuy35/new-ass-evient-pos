@@ -48,11 +48,37 @@ async def login(body: UserLogin, request: Request):
     Verifies the username/password combination against the database,
     creates a signed JWT, logs the action, and returns the token along
     with the user profile.
+    Falls back to local SQLite cache if MongoDB is unreachable.
     """
-    users = get_collection("users")
-    user = await users.find_one({"username": body.username})
+    user = None
+    is_offline = False
 
-    if user is None or not verify_password(body.password, user["password"]):
+    try:
+        users = get_collection("users")
+        user = await users.find_one({"username": body.username})
+    except Exception:
+        # MongoDB is down – try local cache
+        is_offline = True
+
+    if is_offline or user is None:
+        # Attempt offline login from SQLite cache
+        import local_db
+        cached = await local_db.get_cached_user_by_username(body.username)
+        if cached and verify_password(body.password, cached["password"]):
+            user = cached
+            is_offline = True
+        elif cached is None and not is_offline:
+            # MongoDB was reachable but user not found
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password.",
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password.",
+            )
+    elif not verify_password(body.password, user["password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password.",
@@ -72,7 +98,7 @@ async def login(body: UserLogin, request: Request):
         action="LOGIN",
         user_id=str(user["_id"]),
         username=user["username"],
-        details=f"User '{user['username']}' logged in.",
+        details=f"User '{user['username']}' logged in." + (" [OFFLINE]" if is_offline else ""),
         ip_address=client_ip,
     )
 

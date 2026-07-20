@@ -137,12 +137,18 @@ async def get_current_user(request: Request) -> dict:
         users = get_collection("users")
         user = await users.find_one({"_id": ObjectId(user_id)})
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user ID in token.",
-        )
+        # MongoDB may be down – try local cache
+        user = None
 
     if user is None:
+        # Fallback to local SQLite cache
+        try:
+            import local_db
+            cached = await local_db.get_cached_user_by_id(user_id)
+            if cached:
+                return cached
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found.",

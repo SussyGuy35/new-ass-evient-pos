@@ -21,11 +21,16 @@ async def db_setup():
     for coll in collections_to_clear:
         await get_collection(coll).delete_many({})
         
+    # Initialize SQLite offline buffer for tests
+    import local_db
+    await local_db.init_db()
+        
     # Seed the admin user
     await seed_admin()
     
     yield
     
+    await local_db.close_db()
     await close_db()
 
 

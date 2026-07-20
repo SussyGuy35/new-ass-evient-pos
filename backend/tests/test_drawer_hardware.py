@@ -110,3 +110,27 @@ class TestHardwareDrawer:
         assert res.status_code == 501
         
         settings.SERVER_SERIAL_PORT = original_port
+
+
+class TestPrinterHardware:
+    @patch('escpos.printer.Serial')
+    async def test_print_receipt_success(self, mock_escpos, async_client: AsyncClient, employee_token, db_setup):
+        # Create an order first
+        from database import get_collection
+        orders = get_collection("orders")
+        result = await orders.insert_one({
+            "order_number": "TEST-123",
+            "items": [{"name": "Test Item", "quantity": 1, "price": 1000}],
+            "total": 1000,
+            "payment_method": "cash"
+        })
+        order_id = str(result.inserted_id)
+
+        mock_instance = mock_escpos.return_value
+        res = await async_client.post(f"/api/hardware/print_receipt/{order_id}", headers=employee_token)
+        
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+        mock_instance.text.assert_called()
+        mock_instance.cut.assert_called()
+        mock_instance.close.assert_called()

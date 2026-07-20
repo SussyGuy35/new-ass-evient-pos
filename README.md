@@ -9,7 +9,8 @@ EViENT POS is a modern, lightweight Point-of-Sale (POS) application tailored for
   - Direct Cash Drawer communication via the Web Serial API straight from the browser.
   - Native HID Barcode Scanner support with smart event buffering.
 - **Performance Optimized**: DOM manipulations are heavily isolated. Virtual scrolling and pagination prevent browser lag on weaker devices (like embedded Debian GNOME setups).
-- **Asynchronous Backend**: Powered by FastAPI and the Motor async driver for MongoDB.
+- **Offline-First Resilience**: Includes a built-in local SQLite buffer cache. The POS system remains fully operational without internet or when MongoDB goes down, silently queueing orders and syncing automatically when the connection is restored.
+- **Asynchronous Backend**: Powered by FastAPI and the Motor async driver for MongoDB, with `aiosqlite` for local cache.
 - **Invoice Generation**: Dynamically creates PNG invoices using the Python `Pillow` library rather than direct thermal printing.
 - **Security**: Built-in Role-Based Access Control (RBAC) with Admin, Manager, and Employee levels, complete with audit logging for all critical actions.
 

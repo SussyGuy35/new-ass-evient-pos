@@ -64,3 +64,13 @@ def get_collection(name: str):
             "Database not initialised. Call connect_db() first."
         )
     return db[name]
+
+
+def is_online() -> bool:
+    """Return current MongoDB connectivity status (from sync_engine)."""
+    try:
+        from sync_engine import is_online as _sync_is_online
+        return _sync_is_online()
+    except ImportError:
+        return True  # Assume online if sync_engine not loaded yet
+

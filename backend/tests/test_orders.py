@@ -142,8 +142,8 @@ class TestOrderRead:
         assert len(res2.json()["items"]) >= 5
 
     async def test_list_orders_date_filter(self, async_client: AsyncClient, employee_token):
-        from datetime import datetime
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        from datetime import datetime, timezone
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         res = await async_client.get(f"/api/orders?date={today_str}", headers=employee_token)
         assert res.status_code == 200
         assert len(res.json()["items"]) >= 15
