@@ -96,6 +96,24 @@ class ApiClient {
         });
         return this._handleResponse(response);
     }
+
+    /**
+     * Upload file (multipart/form-data). Do NOT set Content-Type header —
+     * the browser will set it automatically with the correct boundary.
+     */
+    async upload(path, formData) {
+        const headers = {};
+        const token = localStorage.getItem('evient_token');
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        const response = await fetch(`${this.baseUrl}${path}`, {
+            method: 'POST',
+            headers,
+            body: formData
+        });
+        return this._handleResponse(response);
+    }
 }
 
 // Export singleton instance

@@ -11,6 +11,8 @@ let adminOrdersPage = 1;
 let adminOrdersTotalPages = 1;
 let adminLogsPage = 1;
 let adminLogsTotalPages = 1;
+let adminPreordersPage = 1;
+let adminPreordersTotalPages = 1;
 let editingProductId = null;
 let editingUserId = null;
 
@@ -42,7 +44,9 @@ function switchTab(tabName) {
         case 'orders':
             loadOrders();
             break;
-
+        case 'preorders':
+            loadPreorders();
+            break;
         case 'logs':
             loadLogs();
             break;
@@ -615,6 +619,374 @@ async function loadLogs(page = 1) {
 }
 
 // =====================
+// TAB: PRE-ORDERS
+// =====================
+async function loadPreorders(page = 1) {
+    adminPreordersPage = page;
+    const container = document.getElementById('admin-preorders-table');
+    if (!container) return;
+
+    container.innerHTML = '<div style="text-align: center; padding: 2rem;"><div class="spinner" style="margin: 0 auto;"></div></div>';
+
+    try {
+        const statusFilter = document.getElementById('preorder-status-filter');
+        const status = statusFilter ? statusFilter.value : '';
+        let url = `/preorders?page=${page}&per_page=${APP_CONFIG.ITEMS_PER_PAGE}`;
+        if (status) url += `&status=${status}`;
+
+        const data = await api.get(url);
+        const preorders = data.items || [];
+        adminPreordersTotalPages = data.total_pages || 1;
+
+        if (preorders.length === 0) {
+            container.innerHTML = '<div class="empty-state"><p>Chưa có đơn đặt trước nào</p></div>';
+            return;
+        }
+
+        const statusMap = {
+            'pending': { label: 'Chờ nhận', badge: 'badge-warning' },
+            'fulfilled': { label: 'Đã giao', badge: 'badge-success' },
+            'cancelled': { label: 'Đã huỷ', badge: 'badge-error' },
+        };
+
+        let html = `
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Mã barcode</th>
+                        <th>Khách hàng</th>
+                        <th>Email</th>
+                        <th>Tổng tiền</th>
+                        <th>Trạng thái</th>
+                        <th>Thời gian</th>
+                        <th style="text-align: right;">Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        preorders.forEach(function (po) {
+            const st = statusMap[po.status] || { label: po.status, badge: 'badge-info' };
+            let createdTime = po.created_at;
+            if (createdTime && !createdTime.endsWith('Z') && !createdTime.includes('+')) {
+                createdTime += 'Z';
+            }
+            const createdAt = createdTime ? new Date(createdTime).toLocaleString('vi-VN') : '—';
+
+            html += `
+                <tr>
+                    <td style="font-family: monospace; font-weight: 500; color: #E2E8F0;">${escapeHtml(po.barcode_code)}</td>
+                    <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(po.customer_name)}</td>
+                    <td style="color: #94A3B8; font-size: 0.8125rem;">${escapeHtml(po.email)}</td>
+                    <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(po.total)}</td>
+                    <td><span class="badge ${st.badge}">${st.label}</span></td>
+                    <td style="color: #64748B; font-size: 0.8125rem;">${createdAt}</td>
+                    <td style="text-align: right;">
+                        ${po.status === 'pending' ? `<button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem; color: #EF4444;" onclick="cancelPreorder('${po.id}')">Huỷ</button>` : ''}
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+        renderAdminPagination('admin-preorders-pagination', adminPreordersPage, adminPreordersTotalPages, 'loadPreorders');
+    } catch (err) {
+        container.innerHTML = `<div class="empty-state"><p>Lỗi: ${err.message}</p></div>`;
+        showToast('Lỗi tải đơn đặt trước: ' + err.message, 'error');
+    }
+}
+
+let manualPreorderItems = [];
+let allProductsForPreorder = [];
+
+async function showCreatePreorderModal() {
+    manualPreorderItems = [];
+    const modal = document.getElementById('modal-overlay');
+    const title = document.getElementById('modal-title');
+    const body = document.getElementById('modal-body');
+    if (!modal || !body) return;
+
+    title.textContent = 'Tạo Đơn Đặt Trước Thủ Công';
+    body.innerHTML = `
+        <div style="text-align: center; padding: 2rem;">
+            <div class="spinner" style="margin: 0 auto;"></div>
+            <p style="margin-top: 1rem; color: #94A3B8;">Đang tải danh sách sản phẩm...</p>
+        </div>
+    `;
+    modal.classList.add('active');
+
+    try {
+        let allProducts = [];
+        let page = 1;
+        let totalPages = 1;
+        
+        while (page <= totalPages) {
+            const res = await api.get(`/products?page=${page}&per_page=100`);
+            allProducts = allProducts.concat(res.items || []);
+            totalPages = res.total_pages || 1;
+            page++;
+        }
+        
+        allProductsForPreorder = allProducts;
+        
+        let productOptions = '<option value="">-- Chọn sản phẩm --</option>';
+        allProductsForPreorder.forEach(p => {
+            productOptions += `<option value="${p.id}">${escapeHtml(p.name)} - ${formatCurrency(p.price)}</option>`;
+        });
+
+        body.innerHTML = `
+            <form id="form-preorder" onsubmit="event.preventDefault(); submitManualPreorder();">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div>
+                        <label class="form-label" for="po-customer">Tên khách hàng *</label>
+                        <input class="form-input" id="po-customer" required placeholder="Nguyễn Văn A">
+                    </div>
+                    <div>
+                        <label class="form-label" for="po-email">Email (nhận mã vạch) *</label>
+                        <input class="form-input" id="po-email" type="email" required placeholder="email@example.com">
+                    </div>
+                </div>
+                
+                <div style="background: #1E293B; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+                    <label class="form-label">Thêm sản phẩm vào đơn</label>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <select class="form-input form-select" id="po-product-select" style="flex: 1;">
+                            ${productOptions}
+                        </select>
+                        <input class="form-input" id="po-qty" type="number" min="1" value="1" style="width: 80px;" placeholder="SL">
+                        <button type="button" class="btn btn-primary" onclick="addManualPreorderItem()">Thêm</button>
+                    </div>
+                    
+                    <div style="max-height: 200px; overflow-y: auto; background: #0F172A; border-radius: 0.25rem;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid #334155; color: #94A3B8; font-size: 0.8125rem;">
+                                    <th style="padding: 0.5rem;">Sản phẩm</th>
+                                    <th style="padding: 0.5rem;">SL</th>
+                                    <th style="padding: 0.5rem; text-align: right;">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="po-items-list">
+                                <tr><td colspan="3" style="text-align: center; padding: 1rem; color: #64748B; font-size: 0.875rem;">Chưa có sản phẩm nào</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem;">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal()">Huỷ</button>
+                    <button type="submit" class="btn btn-primary" id="btn-submit-preorder">Tạo Đơn</button>
+                </div>
+            </form>
+        `;
+    } catch (err) {
+        body.innerHTML = `<p style="color: #EF4444;">Lỗi tải dữ liệu: ${err.message}</p>`;
+    }
+}
+
+function addManualPreorderItem() {
+    const select = document.getElementById('po-product-select');
+    const qtyInput = document.getElementById('po-qty');
+    const productId = select.value;
+    const qty = parseInt(qtyInput.value, 10);
+    
+    if (!productId) {
+        showToast('Vui lòng chọn sản phẩm', 'warning');
+        return;
+    }
+    if (isNaN(qty) || qty < 1) {
+        showToast('Số lượng không hợp lệ', 'warning');
+        return;
+    }
+    
+    const product = allProductsForPreorder.find(p => p.id === productId);
+    if (!product) return;
+    
+    // Check if already in list
+    const existing = manualPreorderItems.find(item => item.product_id === productId);
+    if (existing) {
+        existing.quantity += qty;
+    } else {
+        manualPreorderItems.push({
+            product_id: productId,
+            product_name: product.name,
+            quantity: qty
+        });
+    }
+    
+    renderManualPreorderItems();
+    // Reset qty
+    qtyInput.value = '1';
+}
+
+function removeManualPreorderItem(productId) {
+    manualPreorderItems = manualPreorderItems.filter(item => item.product_id !== productId);
+    renderManualPreorderItems();
+}
+
+function renderManualPreorderItems() {
+    const tbody = document.getElementById('po-items-list');
+    if (!tbody) return;
+    
+    if (manualPreorderItems.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 1rem; color: #64748B; font-size: 0.875rem;">Chưa có sản phẩm nào</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = manualPreorderItems.map(item => `
+        <tr style="border-bottom: 1px solid #1E293B;">
+            <td style="padding: 0.5rem; color: #E2E8F0; font-size: 0.875rem;">${escapeHtml(item.product_name)}</td>
+            <td style="padding: 0.5rem; color: #3B82F6; font-weight: 500;">${item.quantity}</td>
+            <td style="padding: 0.5rem; text-align: right;">
+                <button type="button" class="btn btn-ghost" style="padding: 0.25rem 0.5rem; color: #EF4444;" onclick="removeManualPreorderItem('${item.product_id}')">Xoá</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function submitManualPreorder() {
+    if (manualPreorderItems.length === 0) {
+        showToast('Vui lòng thêm ít nhất 1 sản phẩm vào đơn', 'warning');
+        return;
+    }
+    
+    const customerName = document.getElementById('po-customer').value.trim();
+    const email = document.getElementById('po-email').value.trim();
+    
+    const submitBtn = document.getElementById('btn-submit-preorder');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Đang tạo...';
+    
+    try {
+        const payload = {
+            customer_name: customerName,
+            email: email,
+            items: manualPreorderItems.map(item => ({
+                product_id: item.product_id,
+                quantity: item.quantity
+            }))
+        };
+        
+        await api.post('/preorders', payload);
+        
+        showToast('Tạo đơn đặt trước thành công!', 'success');
+        closeModal();
+        loadPreorders(1);
+    } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Tạo Đơn';
+    }
+}
+
+function showImportCSVModal() {
+    const modal = document.getElementById('modal-overlay');
+    const title = document.getElementById('modal-title');
+    const body = document.getElementById('modal-body');
+    if (!modal || !body) return;
+
+    title.textContent = 'Import đơn hàng từ CSV';
+    body.innerHTML = `
+        <div style="margin-bottom: 1rem;">
+            <p style="color: #94A3B8; font-size: 0.875rem; margin-bottom: 1rem;">
+                Upload file CSV. File cần có các cột:
+                <code style="color: #3B82F6; background: #1E293B; padding: 0.125rem 0.375rem; border-radius: 0.25rem;">customer_name</code>,
+                <code style="color: #3B82F6; background: #1E293B; padding: 0.125rem 0.375rem; border-radius: 0.25rem;">email</code>,
+                <code style="color: #3B82F6; background: #1E293B; padding: 0.125rem 0.375rem; border-radius: 0.25rem;">product_name</code>,
+                <code style="color: #3B82F6; background: #1E293B; padding: 0.125rem 0.375rem; border-radius: 0.25rem;">quantity</code>
+            </p>
+            <p style="color: #64748B; font-size: 0.8125rem; margin-bottom: 1rem;">
+                Các dòng có cùng email sẽ được gộp thành một đơn hàng. Mã vạch sẽ được gửi qua email cho khách.
+            </p>
+        </div>
+        <div style="margin-bottom: 1rem;">
+            <label class="form-label" for="csv-file">Chọn file CSV *</label>
+            <input type="file" class="form-input" id="csv-file" accept=".csv" required
+                   style="padding: 0.5rem; cursor: pointer;">
+        </div>
+        <div id="csv-upload-result" style="display: none; margin-bottom: 1rem;"></div>
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem;">
+            <button type="button" class="btn btn-ghost" onclick="closeModal()">Huỷ</button>
+            <button type="button" class="btn btn-primary" id="btn-upload-csv" onclick="uploadCSV()">
+                Upload & Tạo đơn
+            </button>
+        </div>
+    `;
+    modal.classList.add('active');
+}
+
+async function uploadCSV() {
+    const fileInput = document.getElementById('csv-file');
+    const resultDiv = document.getElementById('csv-upload-result');
+    const uploadBtn = document.getElementById('btn-upload-csv');
+
+    if (!fileInput || !fileInput.files.length) {
+        showToast('Vui lòng chọn file CSV', 'warning');
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        showToast('Vui lòng chọn file có định dạng .csv', 'warning');
+        return;
+    }
+
+    if (uploadBtn) uploadBtn.disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const result = await api.upload('/preorders/import-csv', formData);
+
+        // Show results
+        if (resultDiv) {
+            resultDiv.style.display = 'block';
+            let html = '';
+            if (result.success > 0) {
+                html += `<div style="color: #22C55E; margin-bottom: 0.5rem;">✓ Tạo thành công ${result.success} đơn đặt trước</div>`;
+            }
+            if (result.errors && result.errors.length > 0) {
+                html += `<div style="color: #EF4444; margin-bottom: 0.5rem;">⚠ ${result.errors.length} lỗi:</div>`;
+                html += '<ul style="color: #EF4444; font-size: 0.8125rem; padding-left: 1rem;">';
+                result.errors.forEach(function (e) {
+                    html += `<li>${escapeHtml(e)}</li>`;
+                });
+                html += '</ul>';
+            }
+            resultDiv.innerHTML = html;
+        }
+
+        if (result.success > 0) {
+            showToast(`Đã tạo ${result.success} đơn đặt trước!`, 'success');
+            loadPreorders();
+        }
+    } catch (err) {
+        showToast('Lỗi upload: ' + err.message, 'error');
+        if (resultDiv) {
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = `<div style="color: #EF4444;">Lỗi: ${escapeHtml(err.message)}</div>`;
+        }
+    } finally {
+        if (uploadBtn) uploadBtn.disabled = false;
+    }
+}
+
+async function cancelPreorder(id) {
+    if (!confirm('Bạn có chắc chắn muốn huỷ đơn đặt trước này?')) return;
+
+    try {
+        await api.del(`/preorders/${id}`);
+        showToast('Đã huỷ đơn đặt trước', 'success');
+        loadPreorders(adminPreordersPage);
+    } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+    }
+}
+
+// =====================
 // SHARED UTILITIES
 // =====================
 function renderAdminPagination(containerId, currentPage, totalPages, loadFunction) {
@@ -689,11 +1061,64 @@ function initAdmin() {
         });
     }
 
+    // Export barcode sheet button
+    const exportBarcodeSheetBtn = document.getElementById('btn-export-barcode-sheet');
+    if (exportBarcodeSheetBtn) {
+        exportBarcodeSheetBtn.addEventListener('click', async function () {
+            try {
+                showToast('Đang tạo Barcode Sheet...', 'info');
+                const token = localStorage.getItem('evient_token');
+                const response = await fetch(`${api.baseUrl}/products/export/sheet`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (!response.ok) throw new Error('Không thể xuất file');
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'barcode_sheet.png';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+                showToast('Xuất thành công!', 'success');
+            } catch (err) {
+                showToast('Lỗi: ' + err.message, 'error');
+            }
+        });
+    }
+
     // Add user button
     const addUserBtn = document.getElementById('btn-add-user');
     if (addUserBtn) {
         addUserBtn.addEventListener('click', function () {
             showUserModal(null);
+        });
+    }
+
+    // Import CSV button
+    const importCSVBtn = document.getElementById('btn-import-csv');
+    if (importCSVBtn) {
+        importCSVBtn.addEventListener('click', function () {
+            showImportCSVModal();
+        });
+    }
+
+    // Create Preorder button
+    const createPreorderBtn = document.getElementById('btn-create-preorder');
+    if (createPreorderBtn) {
+        createPreorderBtn.addEventListener('click', function () {
+            showCreatePreorderModal();
+        });
+    }
+
+    // Pre-order status filter
+    const preorderFilter = document.getElementById('preorder-status-filter');
+    if (preorderFilter) {
+        preorderFilter.addEventListener('change', function () {
+            loadPreorders(1);
         });
     }
 

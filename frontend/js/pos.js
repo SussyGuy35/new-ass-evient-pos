@@ -931,6 +931,12 @@ async function checkout(paymentMethod) {
 async function searchByBarcode(barcode) {
     if (!barcode) return;
 
+    // Detect pre-order barcode (starts with PRE-)
+    if (barcode.startsWith('PRE-')) {
+        await handlePreorderScan(barcode);
+        return;
+    }
+
     try {
         const product = await api.get(`/products/barcode/${encodeURIComponent(barcode)}`);
         if (product && product.id) {
@@ -945,6 +951,120 @@ async function searchByBarcode(barcode) {
         }
     } catch (err) {
         showToast(`Không tìm thấy barcode: ${barcode}`, 'warning');
+    }
+}
+
+// --- Pre-order Barcode Handling ---
+async function handlePreorderScan(barcodeCode) {
+    try {
+        const preorder = await api.get(`/preorders/lookup/${encodeURIComponent(barcodeCode)}`);
+        if (preorder && preorder.id) {
+            showPreorderFulfillModal(preorder);
+        }
+    } catch (err) {
+        showToast(err.message || `Không tìm thấy đơn đặt trước: ${barcodeCode}`, 'warning');
+    }
+}
+
+function showPreorderFulfillModal(preorder) {
+    const overlay = document.getElementById('preorder-fulfill-overlay');
+    const body = document.getElementById('preorder-fulfill-body');
+    if (!overlay || !body) return;
+
+    const statusMap = {
+        'pending': { label: 'Chờ nhận hàng', badge: 'badge-warning' },
+        'fulfilled': { label: 'Đã giao', badge: 'badge-success' },
+        'cancelled': { label: 'Đã huỷ', badge: 'badge-error' },
+    };
+    const st = statusMap[preorder.status] || { label: preorder.status, badge: 'badge-info' };
+
+    let itemsHtml = '';
+    preorder.items.forEach(function (item) {
+        itemsHtml += `
+            <tr>
+                <td style="padding: 0.5rem; color: #E2E8F0; font-weight: 500;">${escapeHtml(item.product_name)}</td>
+                <td style="padding: 0.5rem; text-align: center; color: #94A3B8;">${item.quantity}</td>
+                <td style="padding: 0.5rem; text-align: right; color: #3B82F6;">${formatCurrency(item.price)}</td>
+                <td style="padding: 0.5rem; text-align: right; color: #3B82F6;">${formatCurrency(item.price * item.quantity)}</td>
+            </tr>
+        `;
+    });
+
+    const isFulfillable = preorder.status === 'pending';
+
+    body.innerHTML = `
+        <div style="margin-bottom: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+                <span class="badge ${st.badge}">${st.label}</span>
+                <span style="color: #64748B; font-size: 0.8125rem; font-family: monospace;">${escapeHtml(preorder.barcode_code)}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+                <div>
+                    <div style="color: #64748B; font-size: 0.75rem; margin-bottom: 0.25rem;">Khách hàng</div>
+                    <div style="color: #E2E8F0; font-weight: 600;">${escapeHtml(preorder.customer_name)}</div>
+                </div>
+                <div>
+                    <div style="color: #64748B; font-size: 0.75rem; margin-bottom: 0.25rem;">Email</div>
+                    <div style="color: #94A3B8; font-size: 0.875rem;">${escapeHtml(preorder.email)}</div>
+                </div>
+            </div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem;">
+            <thead>
+                <tr style="border-bottom: 1px solid #334155;">
+                    <th style="padding: 0.5rem; text-align: left; color: #64748B; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">Sản phẩm</th>
+                    <th style="padding: 0.5rem; text-align: center; color: #64748B; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">SL</th>
+                    <th style="padding: 0.5rem; text-align: right; color: #64748B; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">Đơn giá</th>
+                    <th style="padding: 0.5rem; text-align: right; color: #64748B; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">Thành tiền</th>
+                </tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+        </table>
+
+        <div style="border-top: 1px solid #334155; padding-top: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                <span style="color: #94A3B8;">Tạm tính</span>
+                <span style="color: #E2E8F0;">${formatCurrency(preorder.subtotal)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                <span style="color: #94A3B8;">VAT (${preorder.vat_rate}%)</span>
+                <span style="color: #E2E8F0;">${formatCurrency(preorder.vat_amount)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 1.125rem; font-weight: 700; margin-top: 0.5rem;">
+                <span style="color: #E2E8F0;">Tổng cộng</span>
+                <span style="color: #3B82F6;">${formatCurrency(preorder.total)}</span>
+            </div>
+            <div style="margin-top: 0.5rem; color: #64748B; font-size: 0.8125rem;">
+                Thanh toán: <span class="badge badge-info">Chuyển khoản</span>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem;">
+            <button class="btn btn-ghost" onclick="document.getElementById('preorder-fulfill-overlay').classList.remove('active')">Đóng</button>
+            ${isFulfillable ? `
+                <button class="btn btn-primary" id="btn-fulfill-preorder" onclick="fulfillPreorder('${escapeHtml(preorder.barcode_code)}')">
+                    Xác nhận giao hàng
+                </button>
+            ` : ''}
+        </div>
+    `;
+
+    overlay.classList.add('active');
+}
+
+async function fulfillPreorder(barcodeCode) {
+    const btn = document.getElementById('btn-fulfill-preorder');
+    if (btn) btn.disabled = true;
+
+    try {
+        const result = await api.post(`/preorders/fulfill/${encodeURIComponent(barcodeCode)}`);
+        showToast('Đã giao hàng thành công! Đơn hàng đã được tạo.', 'success');
+        document.getElementById('preorder-fulfill-overlay').classList.remove('active');
+    } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -969,6 +1089,22 @@ function setupEventListeners() {
             searchDebounceTimer = setTimeout(function () {
                 loadProducts(1, query);
             }, 300);
+        });
+
+        // Handle Enter key for manual barcode entry (like PRE- codes)
+        searchInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const query = e.target.value.trim();
+                if (query) {
+                    if (searchDebounceTimer) {
+                        clearTimeout(searchDebounceTimer);
+                    }
+                    searchByBarcode(query);
+                    e.target.value = ''; // Clear after search
+                    loadProducts(1, ''); // Reset the product grid
+                }
+            }
         });
     }
 

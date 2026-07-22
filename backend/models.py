@@ -166,7 +166,57 @@ class OrderResponse(BaseModel):
         return cls(**doc)
 
 
+# ---------------------------------------------------------------------------
+# Pre-order models
+# ---------------------------------------------------------------------------
 
+class PreOrderItem(BaseModel):
+    """A single line-item inside a pre-order."""
+    product_id: str
+    product_name: str
+    price: float = Field(..., ge=0)
+    quantity: int = Field(..., ge=1)
+
+
+class PreOrderCreateItem(BaseModel):
+    """Line item for creating a pre-order."""
+    product_id: str
+    quantity: int = Field(..., ge=1)
+
+
+class PreOrderCreate(BaseModel):
+    """Payload for creating a pre-order manually."""
+    customer_name: str
+    email: str
+    items: list[PreOrderCreateItem]
+
+
+class PreOrderResponse(BaseModel):
+    """Public representation of a pre-order."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    barcode_code: str
+    customer_name: str
+    email: str
+    items: list[PreOrderItem]
+    subtotal: float
+    vat_rate: float
+    vat_amount: float
+    total: float
+    status: str  # pending | fulfilled | cancelled
+    created_by: str
+    created_at: datetime
+    fulfilled_at: Optional[datetime] = None
+    fulfilled_by: Optional[str] = None
+    order_id: Optional[str] = None
+
+    @classmethod
+    def from_doc(cls, doc: dict) -> "PreOrderResponse":
+        """Build a ``PreOrderResponse`` from a raw MongoDB document."""
+        doc = dict(doc)
+        doc["id"] = str(doc.pop("_id"))
+        return cls(**doc)
 
 
 # ---------------------------------------------------------------------------

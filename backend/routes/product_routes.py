@@ -25,9 +25,34 @@ from models import (
     ProductResponse,
     ProductUpdate,
 )
+from fastapi.responses import StreamingResponse
+import io
+from barcode_sheet import generate_barcode_sheet
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
+
+# --------------------------------------------------------------------------
+# Export
+# --------------------------------------------------------------------------
+
+@router.get("/export/sheet", summary="Export product barcodes as image")
+async def export_barcode_sheet(
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate a PNG image sheet of products containing barcode, name, and price."""
+    products_col = get_collection("products")
+    # Fetch all products that have a barcode
+    cursor = products_col.find({"barcode": {"$exists": True, "$ne": None, "$ne": ""}})
+    products = await cursor.to_list(length=None)
+    
+    img_bytes = generate_barcode_sheet(products)
+    
+    return StreamingResponse(
+        io.BytesIO(img_bytes), 
+        media_type="image/png",
+        headers={"Content-Disposition": "attachment; filename=barcode_sheet.png"}
+    )
 
 # --------------------------------------------------------------------------
 # List / Search

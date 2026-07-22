@@ -76,9 +76,16 @@ class TestProductRead:
         assert res.status_code == 200
         assert res.json()["name"] == "Item 7"
 
-    async def test_get_product_by_barcode_not_found(self, async_client: AsyncClient, employee_token):
-        res = await async_client.get("/api/products/barcode/INVALID", headers=employee_token)
+    async def test_get_product_by_id_not_found(self, async_client: AsyncClient, admin_token):
+        res = await async_client.get(f"/api/products/{'0'*24}", headers=admin_token)
         assert res.status_code == 404
+
+    async def test_export_barcode_sheet(self, async_client: AsyncClient, admin_token):
+        res = await async_client.get("/api/products/export/sheet", headers=admin_token)
+        assert res.status_code == 200
+        assert res.headers["content-type"] == "image/png"
+        assert "attachment; filename=barcode_sheet.png" in res.headers["content-disposition"]
+        assert len(res.content) > 0
 
     async def test_get_product_by_id_success(self, async_client: AsyncClient, employee_token):
         # Get one product id

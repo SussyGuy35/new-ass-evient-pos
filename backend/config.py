@@ -58,5 +58,12 @@ class Settings:
         
         self.VAT_RATE: float = float(os.environ.get("VAT_RATE", "0"))
 
+        # SMTP Email settings
+        self.SMTP_HOST = os.environ.get("SMTP_HOST", "")
+        self.SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+        self.SMTP_USER = os.environ.get("SMTP_USER", "")
+        self.SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+        self.SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "EViENT POS")
+        self.SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 settings = Settings()

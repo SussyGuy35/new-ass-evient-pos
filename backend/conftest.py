@@ -17,7 +17,7 @@ async def db_setup():
     await connect_db()
     
     # Clean specific collections
-    collections_to_clear = ["products", "orders", "system_logs", "counters", "drawer_state", "drawer_transactions", "users"]
+    collections_to_clear = ["products", "orders", "system_logs", "counters", "drawer_state", "drawer_transactions", "users", "preorders"]
     for coll in collections_to_clear:
         await get_collection(coll).delete_many({})
         
