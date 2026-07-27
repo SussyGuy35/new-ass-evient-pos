@@ -52,13 +52,15 @@ class ApiClient {
     }
 
     /**
-     * GET request.
+     * GET request. Accepts an optional AbortSignal.
      */
-    async get(path) {
-        const response = await fetch(`${this.baseUrl}${path}`, {
+    async get(path, signal) {
+        const opts = {
             method: 'GET',
             headers: this._getHeaders()
-        });
+        };
+        if (signal) opts.signal = signal;
+        const response = await fetch(`${this.baseUrl}${path}`, opts);
         return this._handleResponse(response);
     }
 

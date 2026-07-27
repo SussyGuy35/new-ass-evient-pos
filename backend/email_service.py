@@ -96,7 +96,7 @@ async def send_preorder_email(
                     <p style="margin-top: 10px; font-family: monospace; font-size: 1.2em;">{barcode_code}</p>
                 </div>
                 
-                <p>Trân trọng,<br>Kessoku Event</p>
+                <p>Trân trọng,<br>Đội ngũ {settings.ORGANIZER_NAME}</p>
             </div>
         </body>
         </html>

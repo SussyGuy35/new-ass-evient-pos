@@ -65,5 +65,6 @@ class Settings:
         self.SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
         self.SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "EViENT POS")
         self.SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
+        self.ORGANIZER_NAME = os.environ.get("ORGANIZER_NAME", "Kessoku Event")
 
 settings = Settings()

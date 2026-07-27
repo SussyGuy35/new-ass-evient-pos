@@ -10,6 +10,7 @@ let currentPage = 1;
 let totalPages = 1;
 let searchQuery = '';
 let searchDebounceTimer = null;
+let searchAbortController = null;
 // --- Currency Formatter ---
 const currencyFormatter = new Intl.NumberFormat('vi-VN');
 function formatCurrency(amount) {
@@ -58,17 +59,23 @@ async function loadProducts(page = 1, search = '') {
     grid.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1; padding: 3rem;">
             <div class="spinner"></div>
-            <p style="margin-top: 1rem; color: #64748B;">Đang tải sản phẩm...</p>
+            <p style="margin-top: 1rem; color: #94A3B8;">Đang tải sản phẩm...</p>
         </div>
     `;
 
     try {
+        // Abort any pending search request
+        if (searchAbortController) {
+            searchAbortController.abort();
+        }
+        searchAbortController = new AbortController();
+
         let url = `/products?page=${page}&per_page=${APP_CONFIG.ITEMS_PER_PAGE}`;
         if (search) {
             url += `&q=${encodeURIComponent(search)}`;
         }
 
-        const data = await api.get(url);
+        const data = await api.get(url, searchAbortController.signal);
 
         products = data.items || data.products || data || [];
         totalPages = data.total_pages || data.totalPages || 1;
@@ -77,6 +84,9 @@ async function loadProducts(page = 1, search = '') {
         renderProducts();
         renderPagination();
     } catch (err) {
+        // Silently ignore aborted requests (replaced by newer search)
+        if (err.name === 'AbortError') return;
+
         grid.innerHTML = `
             <div class="empty-state" style="grid-column: 1 / -1;">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -84,7 +94,7 @@ async function loadProducts(page = 1, search = '') {
                     <path d="M12 8v4m0 4h.01"/>
                 </svg>
                 <p>Không thể tải sản phẩm</p>
-                <p style="font-size: 0.75rem; margin-top: 0.25rem;">${err.message}</p>
+                <p style="font-size: 0.875rem; margin-top: 0.25rem;">${err.message}</p>
             </div>
         `;
         showToast('Lỗi tải sản phẩm: ' + err.message, 'error');
@@ -125,10 +135,10 @@ function renderProducts() {
                 <div style="font-size: 1.125rem; font-weight: 700; color: #3B82F6;">
                     ${formatCurrency(p.price)}
                 </div>
-                <div style="font-size: 0.75rem;" class="${stockClass}">
+                <div style="font-size: 0.875rem;" class="${stockClass}">
                     ${stockLabel}
                 </div>
-                ${p.barcode ? `<div style="font-size: 0.6875rem; color: #475569; font-family: monospace;">${escapeHtml(p.barcode)}</div>` : ''}
+                ${p.barcode ? `<div style="font-size: 0.8125rem; color: #94A3B8; font-family: monospace;">${escapeHtml(p.barcode)}</div>` : ''}
             </div>
         `;
     }).join('');
@@ -224,7 +234,28 @@ function updateQuantity(index, delta) {
     }
 
     item.quantity = newQty;
-    renderCart();
+
+    // Targeted DOM update instead of full re-render
+    const cartItemEl = document.getElementById('cart-item-' + index);
+    if (cartItemEl) {
+        // Update quantity display (span inside qty controls)
+        const qtySpan = cartItemEl.querySelector('[data-role="qty"]');
+        if (qtySpan) qtySpan.textContent = newQty;
+
+        // Update price × qty line
+        const priceDetail = cartItemEl.querySelector('[data-role="price-detail"]');
+        if (priceDetail) priceDetail.textContent = formatCurrency(item.price) + ' × ' + newQty;
+
+        // Update line total
+        const lineTotal = cartItemEl.querySelector('[data-role="line-total"]');
+        if (lineTotal) lineTotal.textContent = formatCurrency(item.price * newQty);
+
+        // Update totals section
+        updateCartTotal();
+    } else {
+        // Fallback to full re-render
+        renderCart();
+    }
 }
 
 function calculateTotal() {
@@ -258,16 +289,16 @@ function renderCart() {
                         <div style="font-size: 0.8125rem; font-weight: 500; color: #E2E8F0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                             ${escapeHtml(item.name)}
                         </div>
-                        <div style="font-size: 0.75rem; color: #64748B;">
+                        <div style="font-size: 0.875rem; color: #94A3B8;" data-role="price-detail">
                             ${formatCurrency(item.price)} × ${item.quantity}
                         </div>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 0.375rem; flex-shrink: 0;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0;">
                         <button class="qty-btn" onclick="updateQuantity(${index}, -1)" aria-label="Giảm">−</button>
-                        <span style="width: 1.75rem; text-align: center; font-size: 0.875rem; color: #E2E8F0; font-weight: 600;">${item.quantity}</span>
+                        <span style="width: 1.75rem; text-align: center; font-size: 0.875rem; color: #E2E8F0; font-weight: 600;" data-role="qty">${item.quantity}</span>
                         <button class="qty-btn" onclick="updateQuantity(${index}, 1)" aria-label="Tăng">+</button>
                     </div>
-                    <div style="width: 5.5rem; text-align: right; font-weight: 600; color: #3B82F6; font-size: 0.8125rem; flex-shrink: 0;">
+                    <div style="width: 5.5rem; text-align: right; font-weight: 600; color: #3B82F6; font-size: 0.875rem; flex-shrink: 0;" data-role="line-total">
                         ${formatCurrency(item.price * item.quantity)}
                     </div>
                     <button class="qty-btn" style="background: rgba(239,68,68,0.15); color: #EF4444;"
@@ -278,36 +309,42 @@ function renderCart() {
     }
 
     // Update total
-    if (totalContainer) {
-        const subtotal = calculateTotal();
-        const vatRate = APP_CONFIG.VAT_RATE || 0;
-        const vatAmount = subtotal * (vatRate / 100);
-        const total = subtotal + vatAmount;
+    updateCartTotal();
+}
 
-        let html = `
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: #94A3B8; margin-bottom: 0.25rem;">
-                <span>Tạm tính:</span>
-                <span>${formatCurrency(subtotal)}</span>
-            </div>
-        `;
+// --- Update Cart Total (without re-rendering items) ---
+function updateCartTotal() {
+    const totalContainer = document.getElementById('cart-total');
+    if (!totalContainer) return;
 
-        if (vatRate > 0) {
-            html += `
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: #94A3B8; margin-bottom: 0.5rem;">
-                    <span>VAT (${vatRate}%):</span>
-                    <span>${formatCurrency(vatAmount)}</span>
-                </div>
-            `;
-        }
+    const subtotal = calculateTotal();
+    const vatRate = APP_CONFIG.VAT_RATE || 0;
+    const vatAmount = subtotal * (vatRate / 100);
+    const total = subtotal + vatAmount;
 
+    let html = `
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: #94A3B8; margin-bottom: 0.25rem;">
+            <span>Tạm tính:</span>
+            <span>${formatCurrency(subtotal)}</span>
+        </div>
+    `;
+
+    if (vatRate > 0) {
         html += `
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 1.125rem;">
-                <span style="color: #94A3B8; font-weight: 500;">Tổng cộng:</span>
-                <span style="font-weight: 700; color: #E2E8F0;">${formatCurrency(total)}</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; color: #94A3B8; margin-bottom: 0.5rem;">
+                <span>VAT (${vatRate}%):</span>
+                <span>${formatCurrency(vatAmount)}</span>
             </div>
         `;
-        totalContainer.innerHTML = html;
     }
+
+    html += `
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 1.125rem;">
+            <span style="color: #94A3B8; font-weight: 500;">Tổng cộng:</span>
+            <span style="font-weight: 700; color: #E2E8F0;">${formatCurrency(total)}</span>
+        </div>
+    `;
+    totalContainer.innerHTML = html;
 
     // Enable/disable checkout buttons
     const cashBtn = document.getElementById('btn-checkout-cash');

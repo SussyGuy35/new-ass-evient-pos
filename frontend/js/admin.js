@@ -164,14 +164,14 @@ async function loadAdminProducts(page = 1) {
             const stockClass = p.stock <= 0 ? 'stock-out' : p.stock <= 10 ? 'stock-low' : 'stock-ok';
             html += `
                 <tr>
-                    <td style="color: #64748B;">#${p.id}</td>
+                    <td style="color: #94A3B8;">#${p.id}</td>
                     <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(p.name)}</td>
-                    <td style="font-family: monospace; color: #64748B;">${escapeHtml(p.barcode || '—')}</td>
+                    <td style="font-family: monospace; color: #94A3B8;">${escapeHtml(p.barcode || '—')}</td>
                     <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(p.price)}</td>
                     <td class="${stockClass}">${p.stock}</td>
                     <td style="text-align: right;">
-                        <button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem;" onclick="showProductModal('${p.id}')">Sửa</button>
-                        <button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem; color: #EF4444;" onclick="deleteProduct('${p.id}')">Xóa</button>
+                        <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem;" onclick="showProductModal('${p.id}')">Sửa</button>
+                        <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem; color: #EF4444;" onclick="deleteProduct('${p.id}')">Xóa</button>
                     </td>
                 </tr>
             `;
@@ -341,8 +341,8 @@ async function loadUsers() {
                     <td><span class="badge ${roleBadge}">${roleLabel}</span></td>
                     <td><span class="badge ${statusBadge}">${statusLabel}</span></td>
                     <td style="text-align: right;">
-                        <button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem;" onclick="showUserModal('${u.id}')">Sửa</button>
-                        <button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem; color: #EF4444;" onclick="deleteUser('${u.id}')">Xóa</button>
+                        <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem;" onclick="showUserModal('${u.id}')">Sửa</button>
+                        <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem; color: #EF4444;" onclick="deleteUser('${u.id}')">Xóa</button>
                     </td>
                 </tr>
             `;
@@ -504,7 +504,7 @@ async function loadOrders(page = 1) {
             <table class="admin-table">
                 <thead>
                     <tr>
-                        <th>Mã ĐH</th>
+                        <th>Mã đơn hàng</th>
                         <th>Nhân viên</th>
                         <th>Tổng tiền</th>
                         <th>Thanh toán</th>
@@ -530,9 +530,9 @@ async function loadOrders(page = 1) {
                     <td>${escapeHtml(o.cashier_name || o.user?.username || '—')}</td>
                     <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(o.total || o.total_amount || 0)}</td>
                     <td><span class="badge ${paymentBadge}">${paymentLabel}</span></td>
-                    <td style="color: #64748B; font-size: 0.8125rem;">${createdAt}</td>
+                    <td style="color: #94A3B8; font-size: 0.875rem;">${createdAt}</td>
                     <td style="text-align: right;">
-                        <button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem;"
+                        <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem;"
                                 onclick="downloadInvoice('${o.id || o.order_id}')">
                             📄 Xem HĐ
                         </button>
@@ -680,9 +680,9 @@ async function loadPreorders(page = 1) {
                     <td style="color: #94A3B8; font-size: 0.8125rem;">${escapeHtml(po.email)}</td>
                     <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(po.total)}</td>
                     <td><span class="badge ${st.badge}">${st.label}</span></td>
-                    <td style="color: #64748B; font-size: 0.8125rem;">${createdAt}</td>
+                    <td style="color: #94A3B8; font-size: 0.875rem;">${createdAt}</td>
                     <td style="text-align: right;">
-                        ${po.status === 'pending' ? `<button class="btn btn-ghost" style="min-width: auto; padding: 0.25rem 0.5rem; color: #EF4444;" onclick="cancelPreorder('${po.id}')">Huỷ</button>` : ''}
+                        ${po.status === 'pending' ? `<button class="btn btn-ghost" style="padding: 0.375rem 0.75rem; color: #EF4444;" onclick="cancelPreorder('${po.id}')">Huỷ</button>` : ''}
                     </td>
                 </tr>
             `;
