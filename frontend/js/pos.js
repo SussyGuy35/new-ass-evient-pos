@@ -1098,6 +1098,7 @@ async function fulfillPreorder(barcodeCode) {
         const result = await api.post(`/preorders/fulfill/${encodeURIComponent(barcodeCode)}`);
         showToast('Đã giao hàng thành công! Đơn hàng đã được tạo.', 'success');
         document.getElementById('preorder-fulfill-overlay').classList.remove('active');
+        await loadProducts(currentPage, searchQuery);
     } catch (err) {
         showToast('Lỗi: ' + err.message, 'error');
     } finally {
