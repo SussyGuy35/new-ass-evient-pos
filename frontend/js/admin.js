@@ -85,6 +85,10 @@ async function loadDashboard() {
                     <div class="text-sm text-slate-400 mb-1">Chuyển khoản</div>
                     <div class="text-xl font-bold text-white">${formatCurrency(data.all_time.transfer_revenue)}</div>
                 </div>
+                <div class="bg-slate-700 p-4 rounded-xl border border-slate-600">
+                    <div class="text-sm text-slate-400 mb-1">Đặt trước</div>
+                    <div class="text-xl font-bold text-white">${formatCurrency(data.all_time.preorder_revenue)}</div>
+                </div>
             </div>
             
             <h3 class="text-lg font-bold text-white mb-4">Top 5 Sản phẩm Bán chạy</h3>
@@ -168,7 +172,10 @@ async function loadAdminProducts(page = 1) {
                     <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(p.name)}</td>
                     <td style="font-family: monospace; color: #94A3B8;">${escapeHtml(p.barcode || '—')}</td>
                     <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(p.price)}</td>
-                    <td class="${stockClass}">${p.stock}</td>
+                    <td class="${stockClass}">
+                        ${p.stock} 
+                        ${p.stock_reserved ? `<br><span style="font-size: 0.75rem; color: #F59E0B;">(giữ ${p.stock_reserved})</span>` : ''}
+                    </td>
                     <td style="text-align: right;">
                         <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem;" onclick="showProductModal('${p.id}')">Sửa</button>
                         <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem; color: #EF4444;" onclick="deleteProduct('${p.id}')">Xóa</button>
@@ -516,8 +523,16 @@ async function loadOrders(page = 1) {
         `;
 
         orders.forEach(function (o) {
-            const paymentLabel = o.payment_method === 'cash' ? 'Tiền mặt' : 'Chuyển khoản';
-            const paymentBadge = o.payment_method === 'cash' ? 'badge-success' : 'badge-info';
+            let paymentLabel = 'Chuyển khoản';
+            let paymentBadge = 'badge-info';
+            if (o.payment_method === 'cash') {
+                paymentLabel = 'Tiền mặt';
+                paymentBadge = 'badge-success';
+            } else if (o.payment_method === 'preorder') {
+                paymentLabel = 'Đặt trước';
+                paymentBadge = 'badge-secondary';
+            }
+            
             let createdTime = o.created_at;
             if (createdTime && !createdTime.endsWith('Z') && !createdTime.includes('+')) {
                 createdTime += 'Z';
@@ -653,6 +668,7 @@ async function loadPreorders(page = 1) {
             <table class="admin-table">
                 <thead>
                     <tr>
+                        <th style="width: 40px;"><input type="checkbox" id="preorder-select-all" onchange="toggleAllPreorderCheckboxes(this)" style="width: 18px; height: 18px; cursor: pointer;"></th>
                         <th>Mã barcode</th>
                         <th>Khách hàng</th>
                         <th>Email</th>
@@ -675,6 +691,7 @@ async function loadPreorders(page = 1) {
 
             html += `
                 <tr>
+                    <td><input type="checkbox" class="preorder-checkbox" value="${po.id}" onchange="updateBulkResendButton()" style="width: 18px; height: 18px; cursor: pointer;"></td>
                     <td style="font-family: monospace; font-weight: 500; color: #E2E8F0;">${escapeHtml(po.barcode_code)}</td>
                     <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(po.customer_name)}</td>
                     <td style="color: #94A3B8; font-size: 0.8125rem;">${escapeHtml(po.email)}</td>
@@ -682,6 +699,7 @@ async function loadPreorders(page = 1) {
                     <td><span class="badge ${st.badge}">${st.label}</span></td>
                     <td style="color: #94A3B8; font-size: 0.875rem;">${createdAt}</td>
                     <td style="text-align: right;">
+                        <button class="btn btn-ghost" style="padding: 0.375rem 0.75rem; color: #3B82F6;" onclick="resendPreorderEmail('${po.id}')" title="Gửi lại mã vạch qua Email">✉ Gửi lại mail</button>
                         ${po.status === 'pending' ? `<button class="btn btn-ghost" style="padding: 0.375rem 0.75rem; color: #EF4444;" onclick="cancelPreorder('${po.id}')">Huỷ</button>` : ''}
                     </td>
                 </tr>
@@ -690,6 +708,9 @@ async function loadPreorders(page = 1) {
 
         html += '</tbody></table>';
         container.innerHTML = html;
+
+        // Reset bulk button state
+        updateBulkResendButton();
 
         renderAdminPagination('admin-preorders-pagination', adminPreordersPage, adminPreordersTotalPages, 'loadPreorders');
     } catch (err) {
@@ -971,6 +992,63 @@ async function uploadCSV() {
         }
     } finally {
         if (uploadBtn) uploadBtn.disabled = false;
+    }
+}
+
+function toggleAllPreorderCheckboxes(masterCheckbox) {
+    const checkboxes = document.querySelectorAll('.preorder-checkbox');
+    checkboxes.forEach(function (cb) {
+        cb.checked = masterCheckbox.checked;
+    });
+    updateBulkResendButton();
+}
+
+function updateBulkResendButton() {
+    const checked = document.querySelectorAll('.preorder-checkbox:checked');
+    const btn = document.getElementById('btn-bulk-resend-email');
+    const countSpan = document.getElementById('bulk-resend-count');
+    if (btn) {
+        btn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
+    }
+    if (countSpan) {
+        countSpan.textContent = checked.length;
+    }
+}
+
+async function bulkResendEmail() {
+    const checked = document.querySelectorAll('.preorder-checkbox:checked');
+    const ids = Array.from(checked).map(function (cb) { return cb.value; });
+    if (ids.length === 0) {
+        showToast('Chưa chọn đơn nào', 'warning');
+        return;
+    }
+    if (!confirm('Gửi lại email cho ' + ids.length + ' đơn đặt trước?')) return;
+
+    const btn = document.getElementById('btn-bulk-resend-email');
+    if (btn) btn.disabled = true;
+
+    try {
+        showToast('Đang gửi ' + ids.length + ' email...', 'info');
+        const result = await api.post('/preorders/bulk-resend-email', { ids: ids });
+        showToast(result.message, result.failed > 0 ? 'warning' : 'success');
+        // Uncheck all
+        const selectAll = document.getElementById('preorder-select-all');
+        if (selectAll) selectAll.checked = false;
+        toggleAllPreorderCheckboxes({ checked: false });
+    } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function resendPreorderEmail(id) {
+    try {
+        showToast('Đang gửi lại email...', 'info');
+        await api.post(`/preorders/${id}/resend-email`);
+        showToast('Đã gửi lại email thành công!', 'success');
+    } catch (err) {
+        showToast('Lỗi gửi email: ' + err.message, 'error');
     }
 }
 

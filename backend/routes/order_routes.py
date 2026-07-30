@@ -60,6 +60,29 @@ async def create_order(
     Automatically generates a sequential order number, calculates the
     total from the line items, and records the cashier.
     """
+    # Validate stock_reserved vs requested quantity
+    try:
+        products_col = get_collection("products")
+        for item in body.items:
+            try:
+                pid = ObjectId(item.product_id)
+                prod = await products_col.find_one({"_id": pid})
+                if prod:
+                    available = prod.get("stock", 0) - prod.get("stock_reserved", 0)
+                    if available < item.quantity:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Sản phẩm '{prod.get('name')}' không đủ số lượng (Còn: {prod.get('stock', 0)}, Đã giữ: {prod.get('stock_reserved', 0)})."
+                        )
+            except Exception as inner_e:
+                if isinstance(inner_e, HTTPException):
+                    raise inner_e
+                pass
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        pass # Offline mode or db error, proceed to offline check
+
     subtotal = sum(item.price * item.quantity for item in body.items)
     vat_rate = settings.VAT_RATE
     vat_amount = subtotal * (vat_rate / 100)

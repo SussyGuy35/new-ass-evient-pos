@@ -61,6 +61,7 @@ async def _create_tables() -> None:
             price REAL NOT NULL,
             category TEXT,
             stock INTEGER DEFAULT 0,
+            stock_reserved INTEGER DEFAULT 0,
             image_url TEXT,
             created_at TEXT
         );
@@ -108,6 +109,13 @@ async def _create_tables() -> None:
             seq INTEGER DEFAULT 0
         );
     """)
+
+    # Migration: add stock_reserved to products table if it doesn't exist
+    try:
+        await _conn.execute("ALTER TABLE products ADD COLUMN stock_reserved INTEGER DEFAULT 0")
+    except aiosqlite.OperationalError:
+        pass  # Column already exists
+
     # Ensure drawer_state has a row
     await _conn.execute(
         "INSERT OR IGNORE INTO drawer_state (id, balance, last_updated) VALUES ('main', 0, ?)",
@@ -123,21 +131,25 @@ async def _create_tables() -> None:
 async def cache_products(products: list[dict]) -> None:
     """Replace the local product cache with fresh data from MongoDB."""
     await _conn.execute("DELETE FROM products")
-    for p in products:
-        await _conn.execute(
-            """INSERT OR REPLACE INTO products (id, name, barcode, price, category, stock, image_url, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                str(p.get("_id", p.get("id", ""))),
-                p.get("name", ""),
-                p.get("barcode"),
-                p.get("price", 0),
-                p.get("category"),
-                p.get("stock", 0),
-                p.get("image_url"),
-                p.get("created_at", "").isoformat() if hasattr(p.get("created_at", ""), "isoformat") else str(p.get("created_at", "")),
-            )
-        )
+    await _conn.executemany(
+        """
+        INSERT INTO products (id, name, barcode, price, category, stock, stock_reserved, image_url, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name,
+            barcode=excluded.barcode,
+            price=excluded.price,
+            category=excluded.category,
+            stock=excluded.stock,
+            stock_reserved=excluded.stock_reserved,
+            image_url=excluded.image_url
+        """,
+        [(
+            str(p.get("_id", p.get("id", ""))), p["name"], p.get("barcode"), p["price"], 
+            p.get("category"), p.get("stock", 0), p.get("stock_reserved", 0),
+            p.get("image_url"), str(p.get("created_at", ""))
+        ) for p in products]
+    )
     await _conn.commit()
     print(f"[LOCAL_DB] Cached {len(products)} products.")
 
@@ -165,7 +177,7 @@ async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None =
     for r in rows:
         items.append({
             "id": r[0], "name": r[1], "barcode": r[2], "price": r[3],
-            "category": r[4], "stock": r[5], "image_url": r[6], "created_at": r[7],
+            "category": r[4], "stock": r[5], "stock_reserved": r[6], "image_url": r[7], "created_at": r[8],
         })
     return items, total
 
@@ -184,11 +196,11 @@ async def get_cached_product_by_barcode(barcode: str) -> dict | None:
     }
 
 
-async def deduct_cached_stock(product_id: str, qty: int) -> None:
+async def deduct_cached_stock(product_id: str, qty: int, reserve_qty: int = 0) -> None:
     """Deduct stock from the local product cache."""
     await _conn.execute(
-        "UPDATE products SET stock = MAX(0, stock - ?) WHERE id = ?",
-        (qty, product_id)
+        "UPDATE products SET stock = MAX(0, stock - ?), stock_reserved = MAX(0, stock_reserved - ?) WHERE id = ?",
+        (qty, reserve_qty, product_id)
     )
     await _conn.commit()
 

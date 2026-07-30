@@ -373,6 +373,7 @@ async def end_shift(request: Request, current_user: dict = Depends(get_current_u
     total_revenue = 0
     total_cash = 0
     total_transfer = 0
+    total_preorder = 0
     total_orders = len(docs)
     
     for doc in docs:
@@ -381,6 +382,8 @@ async def end_shift(request: Request, current_user: dict = Depends(get_current_u
         total_revenue += amount
         if method == "cash":
             total_cash += amount
+        elif method == "preorder":
+            total_preorder += amount
         elif method == "split":
             payments = doc.get("payments", [])
             for p in payments:
@@ -430,6 +433,7 @@ async def end_shift(request: Request, current_user: dict = Depends(get_current_u
             f.write(f"Total Revenue: {total_revenue:,.0f} VND\n")
             f.write(f" - Cash: {total_cash:,.0f} VND\n")
             f.write(f" - Transfer: {total_transfer:,.0f} VND\n")
+            f.write(f" - Preorder: {total_preorder:,.0f} VND\n")
             f.write("-" * 40 + "\n")
             f.write("Shift ended successfully.\n")
             

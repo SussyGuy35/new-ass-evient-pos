@@ -163,7 +163,7 @@ Cus A,cusa@example.com,Prod 1,2
         from bson import ObjectId
         order_doc = await get_collection("orders").find_one({"_id": ObjectId(data["order_id"])})
         assert order_doc is not None
-        assert order_doc["payment_method"] == "transfer"
+        assert order_doc["payment_method"] == "preorder"
         assert order_doc["total"] == created_preorder["total"]
 
     async def test_cancel_preorder(self, async_client: AsyncClient, admin_token, created_preorder):
@@ -182,3 +182,12 @@ Cus A,cusa@example.com,Prod 1,2
         preorder_id = created_preorder["id"]
         res = await async_client.delete(f"/api/preorders/{preorder_id}", headers=employee_token)
         assert res.status_code == 403
+
+    @patch("routes.preorder_routes.send_preorder_email")
+    async def test_resend_preorder_email(self, mock_send_email, async_client: AsyncClient, admin_token, created_preorder):
+        mock_send_email.return_value = True
+        preorder_id = created_preorder["id"]
+        res = await async_client.post(f"/api/preorders/{preorder_id}/resend-email", headers=admin_token)
+        assert res.status_code == 200
+        assert res.json()["message"] == "Đã gửi lại email thành công."
+        assert mock_send_email.called

@@ -30,7 +30,8 @@
 
 /* --- Kiosk Mode & Touch Gesture Prevention --- */
 html, body {
-    touch-action: manipulation;
+    /* Cho phép cuộn dọc (pan-y) nhưng chặn cuộn ngang (swipe to back) và pinch-to-zoom */
+    touch-action: pan-y;
     overscroll-behavior: none;
     overscroll-behavior-x: none;
     overscroll-behavior-y: none;

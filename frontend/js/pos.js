@@ -4,6 +4,18 @@
  */
 
 // --- State ---
+// Block pinch-to-zoom in JS for Kiosk mode
+document.addEventListener('touchstart', function(e) {
+    if (e.touches.length > 1) {
+        e.preventDefault();
+    }
+}, { passive: false });
+
+document.addEventListener('wheel', function(e) {
+    if (e.ctrlKey) {
+        e.preventDefault();
+    }
+}, { passive: false });
 let cart = [];
 let products = [];
 let currentPage = 1;
@@ -119,9 +131,20 @@ function renderProducts() {
     }
 
     grid.innerHTML = products.map(function (p) {
-        const stockClass = p.stock <= 0 ? 'stock-out' : p.stock <= 10 ? 'stock-low' : 'stock-ok';
-        const stockLabel = p.stock <= 0 ? 'Hết hàng' : `Còn ${p.stock}`;
-        const isDisabled = p.stock <= 0;
+        const available = p.stock - (p.stock_reserved || 0);
+        const stockClass = available <= 0 ? 'stock-out' : available <= 10 ? 'stock-low' : 'stock-ok';
+        
+        let stockLabel = '';
+        if (available <= 0) {
+            stockLabel = 'Hết hàng';
+        } else {
+            stockLabel = `Còn ${p.stock}`;
+            if (p.stock_reserved && p.stock_reserved > 0) {
+                stockLabel += ` (giữ ${p.stock_reserved})`;
+            }
+        }
+        
+        const isDisabled = available <= 0;
 
         return `
             <div class="product-card card-hover ${isDisabled ? 'opacity-50' : ''}"
@@ -182,14 +205,15 @@ function addToCart(productId) {
         return;
     }
 
-    if (product.stock <= 0) {
-        showToast('Sản phẩm đã hết hàng', 'warning');
+    const available = product.stock - (product.stock_reserved || 0);
+    if (available <= 0) {
+        showToast('Sản phẩm đã hết hàng hoặc đã giữ hết', 'warning');
         return;
     }
 
     const existing = cart.find(function (item) { return item.id === productId; });
     if (existing) {
-        if (existing.quantity >= product.stock) {
+        if (existing.quantity >= available) {
             showToast('Đã đạt số lượng tối đa trong kho', 'warning');
             return;
         }
@@ -200,7 +224,8 @@ function addToCart(productId) {
             name: product.name,
             price: product.price,
             quantity: 1,
-            stock: product.stock
+            stock: product.stock,
+            stock_reserved: product.stock_reserved || 0
         });
     }
 
@@ -228,7 +253,8 @@ function updateQuantity(index, delta) {
         return;
     }
 
-    if (newQty > item.stock) {
+    const available = item.stock - (item.stock_reserved || 0);
+    if (newQty > available) {
         showToast('Đã đạt số lượng tối đa trong kho', 'warning');
         return;
     }
@@ -1090,6 +1116,16 @@ function showPreorderFulfillModal(preorder) {
     overlay.classList.add('active');
 }
 
+async function resendPreorderEmailPOS(id) {
+    try {
+        showToast('Đang gửi lại email...', 'info');
+        await api.post(`/preorders/${id}/resend-email`);
+        showToast('Đã gửi lại email thành công!', 'success');
+    } catch (err) {
+        showToast('Lỗi gửi lại email: ' + err.message, 'error');
+    }
+}
+
 async function fulfillPreorder(barcodeCode) {
     const btn = document.getElementById('btn-fulfill-preorder');
     if (btn) btn.disabled = true;
@@ -1098,7 +1134,12 @@ async function fulfillPreorder(barcodeCode) {
         const result = await api.post(`/preorders/fulfill/${encodeURIComponent(barcodeCode)}`);
         showToast('Đã giao hàng thành công! Đơn hàng đã được tạo.', 'success');
         document.getElementById('preorder-fulfill-overlay').classList.remove('active');
+        // Reload immediately (local cache already updated by backend)
         await loadProducts(currentPage, searchQuery);
+        // Reload again after a short delay for MongoDB replication lag
+        setTimeout(function () {
+            loadProducts(currentPage, searchQuery);
+        }, 2000);
     } catch (err) {
         showToast('Lỗi: ' + err.message, 'error');
     } finally {

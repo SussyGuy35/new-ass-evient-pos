@@ -17,9 +17,9 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
     day_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     day_start = day_start_local.astimezone(timezone.utc)
     
-    # Aggregation for standard payment methods
+    # Aggregation for standard payment methods (exclude split and preorder)
     pipeline_standard = [
-        {"$match": {"payment_method": {"$ne": "split"}}},
+        {"$match": {"payment_method": {"$nin": ["split", "preorder"]}}},
         {"$group": {
             "_id": "$payment_method",
             "total_revenue": {"$sum": {"$ifNull": ["$actual_revenue", "$total"]}},
@@ -43,8 +43,22 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
     # Count total split orders separately
     split_orders_count = await orders.count_documents({"payment_method": "split"})
     
-    total_revenue_all = 0
-    total_orders_all = split_orders_count
+    # Aggregation for ALL valid preorders
+    preorders = get_collection("preorders")
+    pipeline_preorder = [
+        {"$match": {"status": {"$ne": "cancelled"}}},
+        {"$group": {
+            "_id": None,
+            "total_revenue": {"$sum": "$total"},
+            "total_orders": {"$sum": 1}
+        }}
+    ]
+    preorder_docs = await preorders.aggregate(pipeline_preorder).to_list(None)
+    preorder_revenue = preorder_docs[0]["total_revenue"] if preorder_docs else 0
+    preorder_count = preorder_docs[0]["total_orders"] if preorder_docs else 0
+    
+    total_revenue_all = preorder_revenue
+    total_orders_all = split_orders_count + preorder_count
     cash_revenue = 0
     transfer_revenue = 0
     
@@ -100,7 +114,8 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
             "revenue": total_revenue_all,
             "orders": total_orders_all,
             "cash_revenue": cash_revenue,
-            "transfer_revenue": transfer_revenue
+            "transfer_revenue": transfer_revenue,
+            "preorder_revenue": preorder_revenue
         },
         "top_products": [
             {

@@ -124,7 +124,7 @@ class TestInvoices:
         ("split", {"payment_method": "split", "payments": [{"method": "cash", "amount": 500}, {"method": "transfer", "amount": 550}]}) # Assume 1000+50 VAT=1050
     ])
     async def test_get_invoice_different_payment_methods(self, async_client: AsyncClient, admin_token, method, payload):
-        p_res = await async_client.post("/api/products", json={"name": "Inv Prod", "price": 1000}, headers=admin_token)
+        p_res = await async_client.post("/api/products", json={"name": "Inv Prod", "price": 1000, "stock": 10}, headers=admin_token)
         p_id = p_res.json()["id"]
         
         order_data = {

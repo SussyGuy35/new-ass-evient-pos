@@ -75,6 +75,7 @@ class ProductCreate(BaseModel):
     price: float = Field(..., ge=0)
     category: Optional[str] = Field(default=None, max_length=100)
     stock: int = Field(default=0, ge=0)
+    stock_reserved: int = Field(default=0, ge=0)
     image_url: Optional[str] = Field(default=None)
 
 
@@ -85,6 +86,7 @@ class ProductUpdate(BaseModel):
     price: Optional[float] = Field(default=None, ge=0)
     category: Optional[str] = Field(default=None, max_length=100)
     stock: Optional[int] = Field(default=None, ge=0)
+    stock_reserved: Optional[int] = Field(default=None, ge=0)
     image_url: Optional[str] = Field(default=None)
 
 
@@ -98,6 +100,7 @@ class ProductResponse(BaseModel):
     price: float
     category: Optional[str] = None
     stock: int
+    stock_reserved: int = 0
     image_url: Optional[str] = None
     created_at: datetime
 

@@ -87,6 +87,20 @@ async def create_preorder(
     result = await preorders_col.insert_one(preorder_doc)
     preorder_doc["_id"] = result.inserted_id
 
+    # Reserve stock
+    from pymongo import UpdateOne
+    bulk_ops = []
+    for item in processed_items:
+        try:
+            pid = ObjectId(item["product_id"])
+            bulk_ops.append(
+                UpdateOne({"_id": pid}, {"$inc": {"stock_reserved": item["quantity"]}})
+            )
+        except Exception:
+            pass
+    if bulk_ops:
+        await products_col.bulk_write(bulk_ops)
+
     await log_action(
         user_id=str(current_user["_id"]),
         username=current_user["username"],
@@ -264,6 +278,19 @@ async def import_csv(
         result = await preorders_col.insert_one(doc)
         doc["_id"] = result.inserted_id
 
+        # Reserve stock
+        bulk_ops = []
+        for item in items_to_save:
+            try:
+                pid = ObjectId(item["product_id"])
+                bulk_ops.append(
+                    UpdateOne({"_id": pid}, {"$inc": {"stock_reserved": item["quantity"]}})
+                )
+            except Exception:
+                pass
+        if bulk_ops:
+            await products_col.bulk_write(bulk_ops)
+
         # Send email (non-blocking failure)
         try:
             await send_preorder_email(
@@ -293,6 +320,64 @@ async def import_csv(
         "success": success_count,
         "errors": errors,
         "preorders": created_preorders,
+    }
+
+
+
+# --------------------------------------------------------------------------
+# Bulk resend pre-order emails
+# --------------------------------------------------------------------------
+
+@router.post("/bulk-resend-email")
+async def bulk_resend_preorder_email(
+    payload: dict,
+    current_user: dict = Depends(require_role("admin", "manager")),
+):
+    """Resend email notifications for multiple pre-orders."""
+    ids = payload.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="Danh sách đơn hàng trống.")
+
+    col = get_collection("preorders")
+    success = 0
+    failed = 0
+
+    for preorder_id in ids:
+        try:
+            oid = ObjectId(preorder_id)
+            doc = await col.find_one({"_id": oid})
+            if not doc:
+                failed += 1
+                continue
+
+            result = await send_preorder_email(
+                to_email=doc["email"],
+                customer_name=doc["customer_name"],
+                barcode_code=doc["barcode_code"],
+                items=doc.get("items", []),
+                subtotal=doc.get("subtotal", 0.0),
+                vat_amount=doc.get("vat_amount", 0.0),
+                total=doc.get("total", 0.0),
+            )
+            if result:
+                success += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+
+    # Audit log
+    await log_action(
+        action="BULK_RESEND_PREORDER_EMAIL",
+        user_id=str(current_user["_id"]),
+        username=current_user["username"],
+        details=f"Bulk resent emails: {success} success, {failed} failed, total {len(ids)}",
+    )
+
+    return {
+        "message": f"Đã gửi {success}/{len(ids)} email thành công.",
+        "success": success,
+        "failed": failed,
     }
 
 
@@ -418,7 +503,7 @@ async def fulfill_preorder(
         "vat_amount": doc["vat_amount"],
         "total": doc["total"],
         "actual_revenue": doc["total"],
-        "payment_method": "transfer",
+        "payment_method": "preorder",
         "payments": None,
         "amount_given": None,
         "expected_change": None,
@@ -431,13 +516,13 @@ async def fulfill_preorder(
     result = await orders_col.insert_one(order_doc)
     order_id = result.inserted_id
 
-    # Deduct stock
+    # Deduct stock and release reserved stock
     bulk_ops = []
     for item in doc["items"]:
         try:
             pid = ObjectId(item["product_id"])
             bulk_ops.append(
-                UpdateOne({"_id": pid}, {"$inc": {"stock": -item["quantity"]}})
+                UpdateOne({"_id": pid}, {"$inc": {"stock": -item["quantity"], "stock_reserved": -item["quantity"]}})
             )
         except Exception:
             pass
@@ -446,6 +531,14 @@ async def fulfill_preorder(
             await products_col.bulk_write(bulk_ops)
         except Exception:
             pass
+
+    # Also update local SQLite cache immediately
+    try:
+        import local_db
+        for item in doc["items"]:
+            await local_db.deduct_cached_stock(item["product_id"], item["quantity"], item["quantity"])
+    except Exception:
+        pass
 
     # Update pre-order status
     updated_doc = await col.find_one_and_update(
@@ -503,6 +596,23 @@ async def cancel_preorder(
             detail="Đơn đặt trước không tồn tại hoặc không thể huỷ.",
         )
 
+    # Release reserved stock
+    products_col = get_collection("products")
+    bulk_ops = []
+    for item in doc.get("items", []):
+        try:
+            pid = ObjectId(item["product_id"])
+            bulk_ops.append(
+                UpdateOne({"_id": pid}, {"$inc": {"stock_reserved": -item["quantity"]}})
+            )
+        except Exception:
+            pass
+    if bulk_ops:
+        try:
+            await products_col.bulk_write(bulk_ops)
+        except Exception:
+            pass
+
     # Audit log
     await log_action(
         action="CANCEL_PREORDER",
@@ -512,3 +622,58 @@ async def cancel_preorder(
     )
 
     return {"message": "Đã huỷ đơn đặt trước."}
+
+
+# --------------------------------------------------------------------------
+# Resend pre-order email
+# --------------------------------------------------------------------------
+
+@router.post("/{preorder_id}/resend-email")
+async def resend_preorder_email(
+    preorder_id: str,
+    current_user: dict = Depends(require_role("admin", "manager")),
+):
+    """Resend email notification for a pre-order."""
+    try:
+        oid = ObjectId(preorder_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mã đơn hàng không hợp lệ.",
+        )
+
+    col = get_collection("preorders")
+    doc = await col.find_one({"_id": oid})
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy đơn đặt trước.",
+        )
+
+    success = await send_preorder_email(
+        to_email=doc["email"],
+        customer_name=doc["customer_name"],
+        barcode_code=doc["barcode_code"],
+        items=doc.get("items", []),
+        subtotal=doc.get("subtotal", 0.0),
+        vat_amount=doc.get("vat_amount", 0.0),
+        total=doc.get("total", 0.0),
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Gửi email thất bại. Vui lòng kiểm tra cấu hình SMTP.",
+        )
+
+    # Audit log
+    await log_action(
+        action="RESEND_PREORDER_EMAIL",
+        user_id=str(current_user["_id"]),
+        username=current_user["username"],
+        details=f"Resent email for pre-order {doc.get('barcode_code', preorder_id)} to {doc.get('email')}",
+    )
+
+    return {"message": "Đã gửi lại email thành công."}
+
