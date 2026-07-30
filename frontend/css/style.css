@@ -28,6 +28,21 @@
     scrollbar-color: #334155 #0F172A;
 }
 
+/* --- Kiosk Mode & Touch Gesture Prevention --- */
+html, body {
+    touch-action: manipulation;
+    overscroll-behavior: none;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
 /* --- Base Transitions --- */
 .transition-default {
     transition: background-color 150ms ease, opacity 150ms ease, transform 150ms ease, border-color 150ms ease;

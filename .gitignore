@@ -41,3 +41,5 @@ Thumbs.db
 # Logs
 *.log
 chrome_profile/
+
+backend/data/

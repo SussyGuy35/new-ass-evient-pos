@@ -1116,6 +1116,14 @@ function escapeHtml(str) {
 
 // --- Setup Event Listeners ---
 function setupEventListeners() {
+    // Prevent Ctrl+Wheel zoom & Pinch gestures
+    document.addEventListener('wheel', function (e) {
+        if (e.ctrlKey) e.preventDefault();
+    }, { passive: false });
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gesturechange', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gestureend', function (e) { e.preventDefault(); }, { passive: false });
+
     // Search input with debounce
     const searchInput = document.getElementById('search-input');
     if (searchInput) {
