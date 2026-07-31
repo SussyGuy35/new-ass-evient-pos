@@ -140,7 +140,14 @@ async function loadAdminProducts(page = 1) {
     container.innerHTML = '<div style="text-align: center; padding: 2rem;"><div class="spinner" style="margin: 0 auto;"></div></div>';
 
     try {
-        const data = await api.get(`/products?page=${page}&per_page=${APP_CONFIG.ITEMS_PER_PAGE}`);
+        let url = `/products?page=${page}&per_page=${APP_CONFIG.ITEMS_PER_PAGE}`;
+        const sortSelect = document.getElementById('product-sort-select');
+        if (sortSelect && sortSelect.value) {
+            const [sortBy, order] = sortSelect.value.split('-');
+            url += `&sort_by=${sortBy}&order=${order}`;
+        }
+
+        const data = await api.get(url);
         const items = data.items || data.products || data || [];
         adminProductsTotalPages = data.total_pages || data.totalPages || 1;
 
@@ -156,7 +163,8 @@ async function loadAdminProducts(page = 1) {
                         <th>ID</th>
                         <th>Tên sản phẩm</th>
                         <th>Barcode</th>
-                        <th>Giá</th>
+                        <th>Giá bán</th>
+                        <th>Giá Preorder</th>
                         <th>Tồn kho</th>
                         <th style="text-align: right;">Thao tác</th>
                     </tr>
@@ -172,6 +180,7 @@ async function loadAdminProducts(page = 1) {
                     <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(p.name)}</td>
                     <td style="font-family: monospace; color: #94A3B8;">${escapeHtml(p.barcode || '—')}</td>
                     <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(p.price)}</td>
+                    <td style="color: #8B5CF6; font-weight: 500;">${p.preorder_price != null ? formatCurrency(p.preorder_price) : '—'}</td>
                     <td class="${stockClass}">
                         ${p.stock} 
                         ${p.stock_reserved ? `<br><span style="font-size: 0.75rem; color: #F59E0B;">(giữ ${p.stock_reserved})</span>` : ''}
@@ -191,6 +200,26 @@ async function loadAdminProducts(page = 1) {
     } catch (err) {
         container.innerHTML = `<div class="empty-state"><p>Lỗi: ${err.message}</p></div>`;
         showToast('Lỗi tải sản phẩm: ' + err.message, 'error');
+    }
+}
+
+async function recalculateReservedStock() {
+    if (!confirm('Bạn có chắc chắn muốn tính toán lại toàn bộ số lượng hàng giữ cho đơn đặt trước?')) return;
+    
+    const btn = document.getElementById('btn-recalc-stock');
+    const oldHtml = btn.innerHTML;
+    btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:6px;"></div> Đang xử lý...';
+    btn.disabled = true;
+
+    try {
+        const res = await api.post('/products/recalculate-reserved-stock');
+        showToast(`Đã tính lại tồn kho! Cập nhật ${res.updated} sản phẩm.`, 'success');
+        loadAdminProducts(); // reload the table
+    } catch (err) {
+        showToast('Lỗi: ' + err.message, 'error');
+    } finally {
+        btn.innerHTML = oldHtml;
+        btn.disabled = false;
     }
 }
 
@@ -239,9 +268,13 @@ function renderProductForm(product) {
                     <input class="form-input" id="prod-price" type="number" min="0" required value="${product ? product.price : ''}" placeholder="0">
                 </div>
                 <div>
-                    <label class="form-label" for="prod-stock">Tồn kho *</label>
-                    <input class="form-input" id="prod-stock" type="number" min="0" required value="${product ? product.stock : ''}" placeholder="0">
+                    <label class="form-label" for="prod-preorder-price">Giá Preorder (VNĐ)</label>
+                    <input class="form-input" id="prod-preorder-price" type="number" min="0" value="${(product && product.preorder_price !== null && product.preorder_price !== undefined) ? product.preorder_price : ''}" placeholder="Nếu trống, sẽ dùng Giá mặc định">
                 </div>
+            </div>
+            <div style="margin-bottom: 1rem;">
+                <label class="form-label" for="prod-stock">Tồn kho *</label>
+                <input class="form-input" id="prod-stock" type="number" min="0" required value="${product ? product.stock : ''}" placeholder="0">
             </div>
             <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem;">
                 <button type="button" class="btn btn-ghost" onclick="closeModal()">Hủy</button>
@@ -257,6 +290,8 @@ async function saveProduct() {
     const name = document.getElementById('prod-name').value.trim();
     const barcode = document.getElementById('prod-barcode').value.trim();
     const price = parseFloat(document.getElementById('prod-price').value);
+    const preorderPriceVal = document.getElementById('prod-preorder-price').value;
+    const preorder_price = preorderPriceVal !== '' ? parseFloat(preorderPriceVal) : null;
     const stock = parseInt(document.getElementById('prod-stock').value, 10);
 
     if (!name) {
@@ -264,7 +299,7 @@ async function saveProduct() {
         return;
     }
 
-    const formData = { name, barcode, price, stock };
+    const formData = { name, barcode, price, preorder_price, stock };
     const saveBtn = document.getElementById('btn-save-product');
     if (saveBtn) saveBtn.disabled = true;
 
@@ -672,6 +707,7 @@ async function loadPreorders(page = 1) {
                         <th>Mã barcode</th>
                         <th>Khách hàng</th>
                         <th>Email</th>
+                        <th>Ghi chú</th>
                         <th>Tổng tiền</th>
                         <th>Trạng thái</th>
                         <th>Thời gian</th>
@@ -695,6 +731,7 @@ async function loadPreorders(page = 1) {
                     <td style="font-family: monospace; font-weight: 500; color: #E2E8F0;">${escapeHtml(po.barcode_code)}</td>
                     <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(po.customer_name)}</td>
                     <td style="color: #94A3B8; font-size: 0.8125rem;">${escapeHtml(po.email)}</td>
+                    <td style="color: #94A3B8; font-size: 0.8125rem; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(po.note || '')}</td>
                     <td style="color: #3B82F6; font-weight: 500;">${formatCurrency(po.total)}</td>
                     <td><span class="badge ${st.badge}">${st.label}</span></td>
                     <td style="color: #94A3B8; font-size: 0.875rem;">${createdAt}</td>
@@ -754,7 +791,8 @@ async function showCreatePreorderModal() {
         
         let productOptions = '<option value="">-- Chọn sản phẩm --</option>';
         allProductsForPreorder.forEach(p => {
-            productOptions += `<option value="${p.id}">${escapeHtml(p.name)} - ${formatCurrency(p.price)}</option>`;
+            const displayPrice = p.preorder_price != null ? p.preorder_price : p.price;
+            productOptions += `<option value="${p.id}">${escapeHtml(p.name)} - ${formatCurrency(displayPrice)}</option>`;
         });
 
         body.innerHTML = `
@@ -770,6 +808,11 @@ async function showCreatePreorderModal() {
                     </div>
                 </div>
                 
+                <div style="margin-bottom: 1rem;">
+                    <label class="form-label" for="po-note">Ghi chú</label>
+                    <input class="form-input" id="po-note" placeholder="Ví dụ: Giao gấp, hoặc thông tin thêm...">
+                </div>
+
                 <div style="background: #1E293B; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem;">
                     <label class="form-label">Thêm sản phẩm vào đơn</label>
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
@@ -875,6 +918,7 @@ async function submitManualPreorder() {
     
     const customerName = document.getElementById('po-customer').value.trim();
     const email = document.getElementById('po-email').value.trim();
+    const note = document.getElementById('po-note') ? document.getElementById('po-note').value.trim() : "";
     
     const submitBtn = document.getElementById('btn-submit-preorder');
     submitBtn.disabled = true;
@@ -884,6 +928,7 @@ async function submitManualPreorder() {
         const payload = {
             customer_name: customerName,
             email: email,
+            note: note,
             items: manualPreorderItems.map(item => ({
                 product_id: item.product_id,
                 quantity: item.quantity

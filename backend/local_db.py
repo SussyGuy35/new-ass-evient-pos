@@ -110,11 +110,15 @@ async def _create_tables() -> None:
         );
     """)
 
-    # Migration: add stock_reserved to products table if it doesn't exist
+    # Migration: add stock_reserved and preorder_price to products table if they don't exist
     try:
         await _conn.execute("ALTER TABLE products ADD COLUMN stock_reserved INTEGER DEFAULT 0")
     except aiosqlite.OperationalError:
-        pass  # Column already exists
+        pass
+    try:
+        await _conn.execute("ALTER TABLE products ADD COLUMN preorder_price REAL")
+    except aiosqlite.OperationalError:
+        pass
 
     # Ensure drawer_state has a row
     await _conn.execute(
@@ -133,19 +137,20 @@ async def cache_products(products: list[dict]) -> None:
     await _conn.execute("DELETE FROM products")
     await _conn.executemany(
         """
-        INSERT INTO products (id, name, barcode, price, category, stock, stock_reserved, image_url, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (id, name, barcode, price, preorder_price, category, stock, stock_reserved, image_url, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             barcode=excluded.barcode,
             price=excluded.price,
+            preorder_price=excluded.preorder_price,
             category=excluded.category,
             stock=excluded.stock,
             stock_reserved=excluded.stock_reserved,
             image_url=excluded.image_url
         """,
         [(
-            str(p.get("_id", p.get("id", ""))), p["name"], p.get("barcode"), p["price"], 
+            str(p.get("_id", p.get("id", ""))), p["name"], p.get("barcode"), p["price"], p.get("preorder_price"),
             p.get("category"), p.get("stock", 0), p.get("stock_reserved", 0),
             p.get("image_url"), str(p.get("created_at", ""))
         ) for p in products]
@@ -154,8 +159,8 @@ async def cache_products(products: list[dict]) -> None:
     print(f"[LOCAL_DB] Cached {len(products)} products.")
 
 
-async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None = None) -> tuple[list[dict], int]:
-    """Read products from the local cache with pagination and optional search."""
+async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None = None, sort_by: str = "created_at", order: str = "desc") -> tuple[list[dict], int]:
+    """Read products from the local cache with pagination, optional search, and sorting."""
     where = ""
     params: list = []
     if q:
@@ -166,18 +171,22 @@ async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None =
     row = await _conn.execute_fetchall(f"SELECT COUNT(*) as cnt FROM products {where}", params)
     total = row[0][0] if row else 0
 
+    valid_sort_fields = {"created_at", "name", "price", "stock"}
+    sort_field = sort_by if sort_by in valid_sort_fields else "created_at"
+    sort_dir = "ASC" if order.lower() == "asc" else "DESC"
+
     # Paginated results
     offset = (page - 1) * per_page
     rows = await _conn.execute_fetchall(
-        f"SELECT * FROM products {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        f"SELECT * FROM products {where} ORDER BY {sort_field} {sort_dir} LIMIT ? OFFSET ?",
         params + [per_page, offset]
     )
 
     items = []
     for r in rows:
         items.append({
-            "id": r[0], "name": r[1], "barcode": r[2], "price": r[3],
-            "category": r[4], "stock": r[5], "stock_reserved": r[6], "image_url": r[7], "created_at": r[8],
+            "id": r[0], "name": r[1], "barcode": r[2], "price": r[3], "preorder_price": r[4],
+            "category": r[5], "stock": r[6], "stock_reserved": r[7], "image_url": r[8], "created_at": r[9],
         })
     return items, total
 
@@ -191,8 +200,8 @@ async def get_cached_product_by_barcode(barcode: str) -> dict | None:
         return None
     r = rows[0]
     return {
-        "id": r[0], "name": r[1], "barcode": r[2], "price": r[3],
-        "category": r[4], "stock": r[5], "image_url": r[6], "created_at": r[7],
+        "id": r[0], "name": r[1], "barcode": r[2], "price": r[3], "preorder_price": r[4],
+        "category": r[5], "stock": r[6], "stock_reserved": r[7], "image_url": r[8], "created_at": r[9],
     }
 
 

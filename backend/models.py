@@ -73,6 +73,7 @@ class ProductCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     barcode: Optional[str] = Field(default=None, max_length=50)
     price: float = Field(..., ge=0)
+    preorder_price: Optional[float] = Field(default=None, ge=0)
     category: Optional[str] = Field(default=None, max_length=100)
     stock: int = Field(default=0, ge=0)
     stock_reserved: int = Field(default=0, ge=0)
@@ -84,6 +85,7 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=200)
     barcode: Optional[str] = Field(default=None, max_length=50)
     price: Optional[float] = Field(default=None, ge=0)
+    preorder_price: Optional[float] = Field(default=None, ge=0)
     category: Optional[str] = Field(default=None, max_length=100)
     stock: Optional[int] = Field(default=None, ge=0)
     stock_reserved: Optional[int] = Field(default=None, ge=0)
@@ -98,6 +100,7 @@ class ProductResponse(BaseModel):
     name: str
     barcode: Optional[str] = None
     price: float
+    preorder_price: Optional[float] = None
     category: Optional[str] = None
     stock: int
     stock_reserved: int = 0
@@ -192,6 +195,7 @@ class PreOrderCreate(BaseModel):
     customer_name: str
     email: str
     items: list[PreOrderCreateItem]
+    note: str = ""
 
 
 class PreOrderResponse(BaseModel):
@@ -208,6 +212,7 @@ class PreOrderResponse(BaseModel):
     vat_amount: float
     total: float
     status: str  # pending | fulfilled | cancelled
+    note: str = ""
     created_by: str
     created_at: datetime
     fulfilled_at: Optional[datetime] = None

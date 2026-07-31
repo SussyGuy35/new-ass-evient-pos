@@ -140,6 +140,22 @@
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-xl font-bold text-white">Quản lý sản phẩm</h2>
                 <div class="flex gap-2">
+                    <select id="product-sort-select" class="form-input form-select text-sm" style="width: auto; min-height: 36px; padding: 0.375rem 2rem 0.375rem 0.75rem; font-size: 0.8125rem;" onchange="loadAdminProducts(1)">
+                        <option value="created_at-desc">Mới nhất</option>
+                        <option value="created_at-asc">Cũ nhất</option>
+                        <option value="name-asc">Tên (A-Z)</option>
+                        <option value="name-desc">Tên (Z-A)</option>
+                        <option value="price-asc">Giá (Thấp-Cao)</option>
+                        <option value="price-desc">Giá (Cao-Thấp)</option>
+                        <option value="stock-asc">Tồn kho (Ít-Nhiều)</option>
+                        <option value="stock-desc">Tồn kho (Nhiều-Ít)</option>
+                    </select>
+                    <button id="btn-recalc-stock" class="btn bg-orange-600 hover:bg-orange-500 text-white border-transparent text-sm gap-1.5" onclick="recalculateReservedStock()">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+                        </svg>
+                        Tính lại
+                    </button>
                     <button id="btn-export-barcode-sheet" class="btn bg-green-600 hover:bg-green-500 text-white border-transparent text-sm gap-1.5">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>

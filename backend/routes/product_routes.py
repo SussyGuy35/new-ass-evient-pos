@@ -12,6 +12,7 @@ Endpoints:
 
 from datetime import datetime, timezone
 import re
+from typing import Optional
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -60,12 +61,14 @@ async def export_barcode_sheet(
 
 @router.get("", response_model=PaginatedResponse)
 async def list_products(
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-    q: str = Query(None, description="Search by name or barcode"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    q: Optional[str] = Query(None, description="Search term for name or barcode"),
+    sort_by: str = Query("created_at", description="Field to sort by"),
+    order: str = Query("desc", description="Sort order: asc or desc"),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return a paginated (and optionally filtered) list of products.
+    """List products with pagination, search, and sorting.
 
     The ``q`` query parameter performs a case-insensitive search against
     the product name **or** barcode.
@@ -87,9 +90,14 @@ async def list_products(
         total = await products.count_documents(query_filter)
         skip = (page - 1) * per_page
 
+        sort_direction = 1 if order.lower() == "asc" else -1
+        # Prevent sorting on unindexed or non-existent fields trivially by mapping
+        valid_sort_fields = {"created_at", "name", "price", "stock"}
+        sort_field = sort_by if sort_by in valid_sort_fields else "created_at"
+
         cursor = (
             products.find(query_filter)
-            .sort("created_at", -1)
+            .sort(sort_field, sort_direction)
             .skip(skip)
             .limit(per_page)
         )
@@ -100,7 +108,7 @@ async def list_products(
     except Exception:
         # Offline fallback → read from SQLite cache
         import local_db
-        cached_items, total = await local_db.get_cached_products(page, per_page, q)
+        cached_items, total = await local_db.get_cached_products(page, per_page, q, sort_by, order)
         return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
 
 
@@ -195,6 +203,7 @@ async def create_product(
         "name": body.name,
         "barcode": body.barcode,
         "price": body.price,
+        "preorder_price": body.preorder_price,
         "category": body.category,
         "stock": body.stock,
         "image_url": body.image_url,
@@ -327,3 +336,56 @@ async def delete_product(
     )
 
     return {"message": "Product deleted successfully."}
+
+
+# --------------------------------------------------------------------------
+# Tools
+# --------------------------------------------------------------------------
+
+@router.post("/recalculate-reserved-stock", summary="Recalculate reserved stock based on pending preorders")
+async def recalculate_reserved_stock(
+    current_user: dict = Depends(require_role("admin", "manager")),
+):
+    """
+    Recalculate `stock_reserved` for all products based on `pending` preorders.
+    """
+    products_col = get_collection("products")
+    preorders_col = get_collection("preorders")
+
+    # Reset all to 0
+    await products_col.update_many({}, {"$set": {"stock_reserved": 0}})
+
+    # Find pending preorders
+    pending = await preorders_col.find({"status": "pending"}).to_list(None)
+    
+    reserved_map = {}
+    for doc in pending:
+        for item in doc.get("items", []):
+            pid = str(item["product_id"])
+            qty = item["quantity"]
+            reserved_map[pid] = reserved_map.get(pid, 0) + qty
+
+    from pymongo import UpdateOne
+    bulk_ops = []
+    for pid_str, qty in reserved_map.items():
+        try:
+            pid = ObjectId(pid_str)
+            bulk_ops.append(
+                UpdateOne({"_id": pid}, {"$set": {"stock_reserved": qty}})
+            )
+        except Exception:
+            pass
+
+    updated_count = 0
+    if bulk_ops:
+        res = await products_col.bulk_write(bulk_ops)
+        updated_count = res.modified_count
+
+    await log_action(
+        user_id=str(current_user["_id"]),
+        username=current_user["username"],
+        action="RECALCULATE_STOCK_RESERVED",
+        details=f"Recalculated reserved stock for {len(reserved_map)} products.",
+    )
+
+    return {"message": "Thành công", "updated": updated_count}

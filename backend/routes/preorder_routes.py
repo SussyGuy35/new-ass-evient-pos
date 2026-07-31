@@ -53,12 +53,13 @@ async def create_preorder(
         if not product:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy sản phẩm có ID: {item.product_id}")
             
-        line_total = product["price"] * item.quantity
+        actual_price = float(product.get("preorder_price") if product.get("preorder_price") is not None else product.get("price", 0))
+        line_total = actual_price * item.quantity
         subtotal += line_total
         processed_items.append({
             "product_id": str(product["_id"]),
             "product_name": product["name"],
-            "price": product["price"],
+            "price": actual_price,
             "quantity": item.quantity
         })
         
@@ -79,6 +80,7 @@ async def create_preorder(
         "vat_amount": vat_amount,
         "total": total,
         "status": "pending",
+        "note": payload.note,
         "created_by": current_user["username"],
         "created_at": datetime.now(timezone.utc),
     }
@@ -193,11 +195,19 @@ async def import_csv(
         email = row.get("email", "").strip().lower()
         if not email:
             continue
+        note = row.get("note", "").strip()
         if email not in groups:
             groups[email] = {
                 "customer_name": row.get("customer_name", "").strip(),
+                "note": note,
                 "items": [],
             }
+        else:
+            if note and note not in groups[email]["note"]:
+                if groups[email]["note"]:
+                    groups[email]["note"] += f" | {note}"
+                else:
+                    groups[email]["note"] = note
         prod_name = row.get("product_name", "").strip()
         if not prod_name:
             continue
@@ -238,7 +248,7 @@ async def import_csv(
                 errors.append(f"Dòng {item['row']}: Không tìm thấy sản phẩm '{prod_name}'")
                 continue
 
-            price = float(product.get("price", 0))
+            price = float(product.get("preorder_price") if product.get("preorder_price") is not None else product.get("price", 0))
             qty = item["quantity"]
             subtotal += price * qty
             items_to_save.append({
@@ -268,6 +278,7 @@ async def import_csv(
             "vat_amount": vat_amount,
             "total": total,
             "status": "pending",
+            "note": group.get("note", ""),
             "created_by": current_user.get("full_name", current_user["username"]),
             "created_at": datetime.now(timezone.utc),
             "fulfilled_at": None,

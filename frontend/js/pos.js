@@ -86,6 +86,11 @@ async function loadProducts(page = 1, search = '') {
         if (search) {
             url += `&q=${encodeURIComponent(search)}`;
         }
+        const sortSelect = document.getElementById('pos-sort-select');
+        if (sortSelect && sortSelect.value) {
+            const [sortBy, order] = sortSelect.value.split('-');
+            url += `&sort_by=${sortBy}&order=${order}`;
+        }
 
         const data = await api.get(url, searchAbortController.signal);
 
@@ -1071,6 +1076,12 @@ function showPreorderFulfillModal(preorder) {
                     <div style="color: #94A3B8; font-size: 0.875rem;">${escapeHtml(preorder.email)}</div>
                 </div>
             </div>
+            ${preorder.note ? `
+            <div style="background: #1E293B; padding: 0.75rem; border-radius: 0.5rem; border-left: 4px solid #3B82F6;">
+                <div style="color: #64748B; font-size: 0.75rem; margin-bottom: 0.25rem;">Ghi chú</div>
+                <div style="color: #E2E8F0; font-size: 0.875rem;">${escapeHtml(preorder.note)}</div>
+            </div>
+            ` : ''}
         </div>
 
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 1rem;">
