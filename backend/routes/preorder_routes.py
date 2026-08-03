@@ -404,19 +404,26 @@ async def list_preorders(
     current_user: dict = Depends(require_role("admin", "manager")),
 ):
     """Return a paginated list of pre-orders, optionally filtered by status."""
-    col = get_collection("preorders")
-    query: dict = {}
-    if status_filter:
-        query["status"] = status_filter
+    try:
+        col = get_collection("preorders")
+        query: dict = {}
+        if status_filter:
+            query["status"] = status_filter
 
-    total = await col.count_documents(query)
-    skip = (page - 1) * per_page
+        total = await col.count_documents(query)
+        skip = (page - 1) * per_page
 
-    cursor = col.find(query).sort("created_at", -1).skip(skip).limit(per_page)
-    docs = await cursor.to_list(length=per_page)
+        cursor = col.find(query).sort("created_at", -1).skip(skip).limit(per_page)
+        docs = await cursor.to_list(length=per_page)
 
-    items = [PreOrderResponse.from_doc(d).model_dump() for d in docs]
-    return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
+        items = [PreOrderResponse.from_doc(d).model_dump() for d in docs]
+        return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
+    except Exception:
+        # Offline fallback → read from SQLite cache
+        import local_db
+        cached_items, total = await local_db.get_cached_preorders(page, per_page, status_filter)
+        items = [PreOrderResponse.from_doc(d).model_dump() for d in cached_items]
+        return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
 
 
 # --------------------------------------------------------------------------
@@ -429,9 +436,21 @@ async def lookup_preorder(
     current_user: dict = Depends(get_current_user),
 ):
     """Find a pre-order by its barcode code (used by POS scanner)."""
-    col = get_collection("preorders")
-    doc = await col.find_one({"barcode_code": barcode_code})
-    if not doc:
+    try:
+        col = get_collection("preorders")
+        doc = await col.find_one({"barcode_code": barcode_code})
+    except Exception:
+        doc = None
+
+    if doc is None:
+        # Offline fallback → try SQLite cache
+        try:
+            import local_db
+            cached = await local_db.get_cached_preorder_by_barcode(barcode_code)
+            if cached:
+                return PreOrderResponse.from_doc(cached)
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Không tìm thấy đơn đặt trước với mã: {barcode_code}",
@@ -457,9 +476,21 @@ async def get_preorder(
             detail="Invalid pre-order ID format.",
         )
 
-    col = get_collection("preorders")
-    doc = await col.find_one({"_id": oid})
-    if not doc:
+    try:
+        col = get_collection("preorders")
+        doc = await col.find_one({"_id": oid})
+    except Exception:
+        doc = None
+
+    if doc is None:
+        # Offline fallback → try SQLite cache
+        try:
+            import local_db
+            cached = await local_db.get_cached_preorder_by_id(preorder_id)
+            if cached:
+                return PreOrderResponse.from_doc(cached)
+        except Exception:
+            pass
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Pre-order not found.",
@@ -477,34 +508,58 @@ async def fulfill_preorder(
     current_user: dict = Depends(get_current_user),
 ):
     """Fulfill a pending pre-order: create a real order, deduct stock, update status."""
-    col = get_collection("preorders")
-    doc = await col.find_one({"barcode_code": barcode_code})
+    import local_db
 
-    if not doc:
+    is_offline = False
+    doc = None
+
+    # 1. Look up the preorder
+    try:
+        col = get_collection("preorders")
+        doc = await col.find_one({"barcode_code": barcode_code})
+    except Exception:
+        is_offline = True
+
+    if doc is None and not is_offline:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Không tìm thấy đơn đặt trước với mã: {barcode_code}",
         )
 
-    if doc["status"] == "fulfilled":
+    if doc is None:
+        # Offline fallback — look up from SQLite cache
+        cached = await local_db.get_cached_preorder_by_barcode(barcode_code)
+        if not cached:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Không tìm thấy đơn đặt trước với mã: {barcode_code}",
+            )
+        doc = cached
+
+    # 2. Validate status
+    if doc.get("status") == "fulfilled":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Đơn hàng đã được giao trước đó.",
         )
-    if doc["status"] == "cancelled":
+    if doc.get("status") == "cancelled":
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="Đơn hàng đã bị huỷ.",
         )
 
-    # Create a real order
-    orders_col = get_collection("orders")
-    products_col = get_collection("products")
-
-    order_number = await _generate_order_number()
+    # 3. Build order document
     now = datetime.now(timezone.utc)
     user_id = str(current_user["_id"])
     cashier_name = current_user.get("full_name", current_user["username"])
+    preorder_id = str(doc.get("_id", doc.get("id", "")))
+
+    # Generate order number
+    try:
+        order_number = await _generate_order_number()
+    except Exception:
+        is_offline = True
+        order_number = await local_db.next_offline_order_number()
 
     order_doc = {
         "order_number": order_number,
@@ -524,56 +579,135 @@ async def fulfill_preorder(
         "created_at": now,
     }
 
-    result = await orders_col.insert_one(order_doc)
-    order_id = result.inserted_id
+    if is_offline:
+        # --- OFFLINE PATH ---
+        order_doc["_id"] = ObjectId()
 
-    # Deduct stock and release reserved stock
-    bulk_ops = []
-    for item in doc["items"]:
-        try:
-            pid = ObjectId(item["product_id"])
-            bulk_ops.append(
-                UpdateOne({"_id": pid}, {"$inc": {"stock": -item["quantity"], "stock_reserved": -item["quantity"]}})
-            )
-        except Exception:
-            pass
-    if bulk_ops:
-        try:
-            await products_col.bulk_write(bulk_ops)
-        except Exception:
-            pass
+        # Queue the order
+        await local_db.queue_order(order_doc)
 
-    # Also update local SQLite cache immediately
-    try:
-        import local_db
+        # Queue the fulfill action for later sync to MongoDB
+        await local_db.queue_preorder_fulfill({
+            "preorder_id": preorder_id,
+            "barcode_code": barcode_code,
+            "order_doc": order_doc,
+            "fulfilled_at": now.isoformat(),
+            "fulfilled_by": cashier_name,
+        })
+
+        # Update local caches
+        await local_db.update_cached_preorder_status(
+            preorder_id, "fulfilled",
+            fulfilled_at=now.isoformat(),
+            fulfilled_by=cashier_name,
+            order_id=str(order_doc["_id"]),
+        )
         for item in doc["items"]:
-            await local_db.deduct_cached_stock(item["product_id"], item["quantity"], item["quantity"])
-    except Exception:
-        pass
+            await local_db.deduct_cached_stock(
+                item["product_id"], item["quantity"], item["quantity"]
+            )
 
-    # Update pre-order status
-    updated_doc = await col.find_one_and_update(
-        {"_id": doc["_id"]},
-        {
-            "$set": {
-                "status": "fulfilled",
-                "fulfilled_at": now,
+        # Build response
+        doc["status"] = "fulfilled"
+        doc["fulfilled_at"] = now
+        doc["fulfilled_by"] = cashier_name
+        doc["order_id"] = str(order_doc["_id"])
+        if "_id" not in doc:
+            doc["_id"] = preorder_id
+    else:
+        # --- ONLINE PATH ---
+        try:
+            orders_col = get_collection("orders")
+            products_col = get_collection("products")
+
+            result = await orders_col.insert_one(order_doc)
+            order_id = result.inserted_id
+
+            # Deduct stock and release reserved stock
+            bulk_ops = []
+            for item in doc["items"]:
+                try:
+                    pid = ObjectId(item["product_id"])
+                    bulk_ops.append(
+                        UpdateOne({"_id": pid}, {"$inc": {"stock": -item["quantity"], "stock_reserved": -item["quantity"]}})
+                    )
+                except Exception:
+                    pass
+            if bulk_ops:
+                try:
+                    await products_col.bulk_write(bulk_ops)
+                except Exception:
+                    pass
+
+            # Also update local SQLite cache immediately
+            try:
+                for item in doc["items"]:
+                    await local_db.deduct_cached_stock(item["product_id"], item["quantity"], item["quantity"])
+            except Exception:
+                pass
+
+            # Update pre-order status
+            doc = await col.find_one_and_update(
+                {"_id": doc["_id"]},
+                {
+                    "$set": {
+                        "status": "fulfilled",
+                        "fulfilled_at": now,
+                        "fulfilled_by": cashier_name,
+                        "order_id": str(order_id),
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+
+            # Update local preorder cache too
+            try:
+                await local_db.update_cached_preorder_status(
+                    preorder_id, "fulfilled",
+                    fulfilled_at=now.isoformat(),
+                    fulfilled_by=cashier_name,
+                    order_id=str(order_id),
+                )
+            except Exception:
+                pass
+
+        except Exception as exc:
+            # MongoDB failed mid-operation — fall back to offline buffering
+            print(f"[OFFLINE] Fulfill failed during write, buffering. {exc}")
+            order_doc["_id"] = ObjectId()
+            await local_db.queue_order(order_doc)
+            await local_db.queue_preorder_fulfill({
+                "preorder_id": preorder_id,
+                "barcode_code": barcode_code,
+                "order_doc": order_doc,
+                "fulfilled_at": now.isoformat(),
                 "fulfilled_by": cashier_name,
-                "order_id": str(order_id),
-            }
-        },
-        return_document=ReturnDocument.AFTER,
-    )
+            })
+            await local_db.update_cached_preorder_status(
+                preorder_id, "fulfilled",
+                fulfilled_at=now.isoformat(),
+                fulfilled_by=cashier_name,
+                order_id=str(order_doc["_id"]),
+            )
+            for item in doc["items"]:
+                await local_db.deduct_cached_stock(
+                    item["product_id"], item["quantity"], item["quantity"]
+                )
+            doc["status"] = "fulfilled"
+            doc["fulfilled_at"] = now
+            doc["fulfilled_by"] = cashier_name
+            doc["order_id"] = str(order_doc["_id"])
+            is_offline = True
 
     # Audit log
     await log_action(
         action="FULFILL_PREORDER",
         user_id=user_id,
         username=current_user["username"],
-        details=f"Fulfilled pre-order {barcode_code} → order {order_number}",
+        details=f"Fulfilled pre-order {barcode_code} → order {order_number}" + (" [OFFLINE]" if is_offline else ""),
     )
 
-    return PreOrderResponse.from_doc(updated_doc)
+    return PreOrderResponse.from_doc(doc)
 
 
 # --------------------------------------------------------------------------

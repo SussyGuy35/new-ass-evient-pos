@@ -78,8 +78,14 @@ async def check_online() -> bool:
 # --------------------------------------------------------------------------
 
 async def sync_pending_orders() -> int:
-    """Push pending offline orders to MongoDB. Returns count synced."""
+    """Push pending offline orders to MongoDB. Returns count synced.
+
+    For each order we:
+    1. Insert the order document.
+    2. Deduct stock on the remote ``products`` collection (bulk $inc).
+    """
     orders_col = get_collection("orders")
+    products_col = get_collection("products")
     pending = await local_db.pop_pending_orders()
     synced = 0
     for item in pending:
@@ -89,6 +95,29 @@ async def sync_pending_orders() -> int:
             if isinstance(doc.get("created_at"), str):
                 doc["created_at"] = datetime.fromisoformat(doc["created_at"])
             await orders_col.insert_one(doc)
+
+            # Deduct stock on remote for every line item
+            from pymongo import UpdateOne
+            bulk_ops = []
+            for line in doc.get("items", []):
+                pid = line.get("product_id")
+                qty = line.get("quantity", 0)
+                if pid and qty > 0:
+                    try:
+                        from bson import ObjectId
+                        oid = ObjectId(pid)
+                    except Exception:
+                        continue
+                    bulk_ops.append(UpdateOne(
+                        {"_id": oid},
+                        {"$inc": {"stock": -qty}},
+                    ))
+            if bulk_ops:
+                try:
+                    await products_col.bulk_write(bulk_ops)
+                except Exception as stock_err:
+                    print(f"[SYNC] Stock deduction failed for order {doc.get('order_number')}: {stock_err}")
+
             await local_db.remove_pending_order(item["local_id"])
             synced += 1
         except Exception as e:
@@ -148,14 +177,83 @@ async def sync_pending_logs() -> int:
     return synced
 
 
-async def sync_pending_stock_deductions() -> None:
-    """Re-apply stock deductions from synced orders to MongoDB products.
-    
-    Note: Stock is already deducted in the order doc's items during offline.
-    When we sync the order, we also need to deduct stock on remote.
-    This is handled inside sync_pending_orders by including stock ops.
+
+async def sync_pending_preorder_fulfills() -> int:
+    """Push pending offline preorder fulfills to MongoDB. Returns count synced.
+
+    For each buffered fulfill we:
+    1. Insert the order document into ``orders``.
+    2. Deduct stock and release reserved stock on ``products``.
+    3. Update the preorder status to ``fulfilled`` on ``preorders``.
     """
-    pass  # Stock deduction is handled within the order sync
+    orders_col = get_collection("orders")
+    products_col = get_collection("products")
+    preorders_col = get_collection("preorders")
+    pending = await local_db.pop_pending_preorder_fulfills()
+    synced = 0
+    for item in pending:
+        try:
+            data = item["data"]
+            order_doc = data["order_doc"]
+            preorder_id = data["preorder_id"]
+            barcode_code = data["barcode_code"]
+            fulfilled_at = data.get("fulfilled_at")
+            fulfilled_by = data.get("fulfilled_by")
+
+            # Convert datetime strings
+            if isinstance(order_doc.get("created_at"), str):
+                order_doc["created_at"] = datetime.fromisoformat(order_doc["created_at"])
+
+            # 1. Insert order
+            result = await orders_col.insert_one(order_doc)
+            order_id = str(result.inserted_id)
+
+            # 2. Deduct stock + release reserved
+            from pymongo import UpdateOne
+            from bson import ObjectId
+            bulk_ops = []
+            for line in order_doc.get("items", []):
+                pid = line.get("product_id")
+                qty = line.get("quantity", 0)
+                if pid and qty > 0:
+                    try:
+                        oid = ObjectId(pid)
+                    except Exception:
+                        continue
+                    bulk_ops.append(UpdateOne(
+                        {"_id": oid},
+                        {"$inc": {"stock": -qty, "stock_reserved": -qty}},
+                    ))
+            if bulk_ops:
+                try:
+                    await products_col.bulk_write(bulk_ops)
+                except Exception as e:
+                    print(f"[SYNC] Stock deduction failed for fulfill {barcode_code}: {e}")
+
+            # 3. Update preorder status on remote
+            if isinstance(fulfilled_at, str):
+                fulfilled_at_dt = datetime.fromisoformat(fulfilled_at)
+            else:
+                fulfilled_at_dt = fulfilled_at or datetime.now(timezone.utc)
+            try:
+                await preorders_col.find_one_and_update(
+                    {"_id": ObjectId(preorder_id)},
+                    {"$set": {
+                        "status": "fulfilled",
+                        "fulfilled_at": fulfilled_at_dt,
+                        "fulfilled_by": fulfilled_by,
+                        "order_id": order_id,
+                    }},
+                )
+            except Exception as e:
+                print(f"[SYNC] Failed to update preorder status for {barcode_code}: {e}")
+
+            await local_db.remove_pending_preorder_fulfill(item["local_id"])
+            synced += 1
+        except Exception as e:
+            print(f"[SYNC] Failed to sync preorder fulfill local_id={item['local_id']}: {e}")
+            break
+    return synced
 
 
 async def push_all_pending() -> dict:
@@ -164,6 +262,7 @@ async def push_all_pending() -> dict:
         "orders": await sync_pending_orders(),
         "drawer_txs": await sync_pending_drawer_txs(),
         "logs": await sync_pending_logs(),
+        "preorder_fulfills": await sync_pending_preorder_fulfills(),
     }
     total = sum(results.values())
     if total > 0:
@@ -176,7 +275,7 @@ async def push_all_pending() -> dict:
 # --------------------------------------------------------------------------
 
 async def sync_remote_to_local() -> None:
-    """Download products and users from MongoDB into the local SQLite cache."""
+    """Download products, users, preorders, and recent orders from MongoDB into SQLite."""
     try:
         # Sync products
         products_col = get_collection("products")
@@ -189,6 +288,18 @@ async def sync_remote_to_local() -> None:
         cursor = users_col.find({})
         users = await cursor.to_list(length=1000)
         await local_db.cache_users(users)
+
+        # Sync preorders (all non-cancelled — pending + fulfilled for lookup)
+        preorders_col = get_collection("preorders")
+        cursor = preorders_col.find({"status": {"$ne": "cancelled"}})
+        preorders = await cursor.to_list(length=10000)
+        await local_db.cache_preorders(preorders)
+
+        # Sync recent orders (last 500 for offline history)
+        orders_col = get_collection("orders")
+        cursor = orders_col.find({}).sort("created_at", -1).limit(500)
+        orders = await cursor.to_list(length=500)
+        await local_db.cache_orders(orders)
 
         # Sync drawer state
         drawer_col = get_collection("drawer_state")

@@ -296,9 +296,10 @@ async def list_orders(
         items = [OrderResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
     except Exception:
-        # Offline fallback: just return an empty list or cached pending orders
-        # For simplicity, returning empty list as order history isn't critical offline
-        return PaginatedResponse.build(items=[], total=0, page=page, per_page=per_page)
+        # Offline fallback: read from SQLite order cache
+        import local_db
+        cached_items, total = await local_db.get_cached_orders(page, per_page, date)
+        return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
 
 
 # --------------------------------------------------------------------------
@@ -332,6 +333,11 @@ async def get_order(
     except HTTPException:
         raise
     except Exception:
+        # Offline fallback: try SQLite cache
+        import local_db
+        cached = await local_db.get_cached_order_by_id(order_id)
+        if cached:
+            return cached
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Order lookup unavailable while offline.",

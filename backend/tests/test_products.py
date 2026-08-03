@@ -81,7 +81,7 @@ class TestProductRead:
         assert res.status_code == 404
 
     async def test_export_barcode_sheet(self, async_client: AsyncClient, admin_token):
-        res = await async_client.get("/api/products/export/sheet", headers=admin_token)
+        res = await async_client.post("/api/products/export/sheet", json={}, headers=admin_token)
         assert res.status_code == 200
         assert res.headers["content-type"] == "image/png"
         assert "attachment; filename=barcode_sheet.png" in res.headers["content-disposition"]

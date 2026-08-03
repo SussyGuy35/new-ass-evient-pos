@@ -23,6 +23,7 @@ from middleware import log_action
 from models import (
     PaginatedResponse,
     ProductCreate,
+    ExportSheetRequest,
     ProductResponse,
     ProductUpdate,
 )
@@ -37,14 +38,27 @@ router = APIRouter(prefix="/products", tags=["Products"])
 # Export
 # --------------------------------------------------------------------------
 
-@router.get("/export/sheet", summary="Export product barcodes as image")
+@router.post("/export/sheet", summary="Export product barcodes as image")
 async def export_barcode_sheet(
+    body: ExportSheetRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Generate a PNG image sheet of products containing barcode, name, and price."""
     products_col = get_collection("products")
-    # Fetch all products that have a barcode
-    cursor = products_col.find({"barcode": {"$exists": True, "$ne": None, "$ne": ""}})
+    
+    query = {"barcode": {"$exists": True, "$ne": None, "$ne": ""}}
+    if body.product_ids:
+        try:
+            object_ids = [ObjectId(pid) for pid in body.product_ids]
+            query["_id"] = {"$in": object_ids}
+        except Exception:
+            pass
+            
+    sort_direction = 1 if body.order.lower() == "asc" else -1
+    valid_sort_fields = {"created_at", "name", "price", "stock"}
+    sort_field = body.sort_by if body.sort_by in valid_sort_fields else "created_at"
+
+    cursor = products_col.find(query).sort(sort_field, sort_direction)
     products = await cursor.to_list(length=None)
     
     img_bytes = generate_barcode_sheet(products)
@@ -206,7 +220,6 @@ async def create_product(
         "preorder_price": body.preorder_price,
         "category": body.category,
         "stock": body.stock,
-        "image_url": body.image_url,
         "created_at": datetime.now(timezone.utc),
     }
     result = await products.insert_one(doc)

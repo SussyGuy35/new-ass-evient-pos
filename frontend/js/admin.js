@@ -160,6 +160,9 @@ async function loadAdminProducts(page = 1) {
             <table class="admin-table">
                 <thead>
                     <tr>
+                        <th style="width: 40px; text-align: center;">
+                            <input type="checkbox" id="select-all-products" class="form-checkbox" onclick="toggleAllProducts(this)">
+                        </th>
                         <th>ID</th>
                         <th>Tên sản phẩm</th>
                         <th>Barcode</th>
@@ -176,6 +179,9 @@ async function loadAdminProducts(page = 1) {
             const stockClass = p.stock <= 0 ? 'stock-out' : p.stock <= 10 ? 'stock-low' : 'stock-ok';
             html += `
                 <tr>
+                    <td style="text-align: center;">
+                        <input type="checkbox" class="product-checkbox form-checkbox" value="${p.id}" ${!p.barcode ? 'disabled title="Sản phẩm không có barcode"' : ''}>
+                    </td>
                     <td style="color: #94A3B8;">#${p.id}</td>
                     <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(p.name)}</td>
                     <td style="font-family: monospace; color: #94A3B8;">${escapeHtml(p.barcode || '—')}</td>
@@ -202,6 +208,11 @@ async function loadAdminProducts(page = 1) {
         showToast('Lỗi tải sản phẩm: ' + err.message, 'error');
     }
 }
+
+window.toggleAllProducts = function(source) {
+    const checkboxes = document.querySelectorAll('.product-checkbox:not([disabled])');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+};
 
 async function recalculateReservedStock() {
     if (!confirm('Bạn có chắc chắn muốn tính toán lại toàn bộ số lượng hàng giữ cho đơn đặt trước?')) return;
@@ -1189,10 +1200,33 @@ function initAdmin() {
     if (exportBarcodeSheetBtn) {
         exportBarcodeSheetBtn.addEventListener('click', async function () {
             try {
+                // Determine selected products
+                const selectedCheckboxes = document.querySelectorAll('.product-checkbox:checked');
+                const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+                // Determine current sort & search
+                const sortSelect = document.getElementById('product-sort-select');
+                let sortBy = 'created_at', order = 'desc';
+                if (sortSelect && sortSelect.value) {
+                    [sortBy, order] = sortSelect.value.split('-');
+                }
+                const searchInput = document.getElementById('search-input'); // if we have global search, else omit
+
+                const payload = {
+                    product_ids: selectedIds,
+                    sort_by: sortBy,
+                    order: order
+                };
+                
                 showToast('Đang tạo Barcode Sheet...', 'info');
                 const token = localStorage.getItem('evient_token');
                 const response = await fetch(`${api.baseUrl}/products/export/sheet`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
                 });
                 
                 if (!response.ok) throw new Error('Không thể xuất file');

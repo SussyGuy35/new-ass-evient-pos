@@ -62,7 +62,6 @@ async def _create_tables() -> None:
             category TEXT,
             stock INTEGER DEFAULT 0,
             stock_reserved INTEGER DEFAULT 0,
-            image_url TEXT,
             created_at TEXT
         );
 
@@ -108,6 +107,38 @@ async def _create_tables() -> None:
             date_key TEXT PRIMARY KEY,
             seq INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS preorders (
+            id TEXT PRIMARY KEY,
+            barcode_code TEXT UNIQUE NOT NULL,
+            customer_name TEXT NOT NULL,
+            email TEXT,
+            items TEXT,
+            subtotal REAL,
+            vat_rate REAL,
+            vat_amount REAL,
+            total REAL,
+            status TEXT DEFAULT 'pending',
+            note TEXT DEFAULT '',
+            created_by TEXT,
+            created_at TEXT,
+            fulfilled_at TEXT,
+            fulfilled_by TEXT,
+            order_id TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS orders (
+            id TEXT PRIMARY KEY,
+            order_data TEXT NOT NULL,
+            order_number TEXT,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS pending_preorder_fulfills (
+            local_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fulfill_data TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
     """)
 
     # Migration: add stock_reserved and preorder_price to products table if they don't exist
@@ -137,8 +168,8 @@ async def cache_products(products: list[dict]) -> None:
     await _conn.execute("DELETE FROM products")
     await _conn.executemany(
         """
-        INSERT INTO products (id, name, barcode, price, preorder_price, category, stock, stock_reserved, image_url, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (id, name, barcode, price, preorder_price, category, stock, stock_reserved, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name=excluded.name,
             barcode=excluded.barcode,
@@ -146,13 +177,12 @@ async def cache_products(products: list[dict]) -> None:
             preorder_price=excluded.preorder_price,
             category=excluded.category,
             stock=excluded.stock,
-            stock_reserved=excluded.stock_reserved,
-            image_url=excluded.image_url
+            stock_reserved=excluded.stock_reserved
         """,
         [(
             str(p.get("_id", p.get("id", ""))), p["name"], p.get("barcode"), p["price"], p.get("preorder_price"),
             p.get("category"), p.get("stock", 0), p.get("stock_reserved", 0),
-            p.get("image_url"), str(p.get("created_at", ""))
+            str(p.get("created_at", ""))
         ) for p in products]
     )
     await _conn.commit()
@@ -185,8 +215,15 @@ async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None =
     items = []
     for r in rows:
         items.append({
-            "id": r[0], "name": r[1], "barcode": r[2], "price": r[3], "preorder_price": r[4],
-            "category": r[5], "stock": r[6], "stock_reserved": r[7], "image_url": r[8], "created_at": r[9],
+            "id": r["id"], 
+            "name": r["name"], 
+            "barcode": r["barcode"], 
+            "price": r["price"], 
+            "preorder_price": r["preorder_price"] if "preorder_price" in r.keys() else None,
+            "category": r["category"], 
+            "stock": r["stock"], 
+            "stock_reserved": r["stock_reserved"] if "stock_reserved" in r.keys() else 0, 
+            "created_at": r["created_at"],
         })
     return items, total
 
@@ -200,8 +237,15 @@ async def get_cached_product_by_barcode(barcode: str) -> dict | None:
         return None
     r = rows[0]
     return {
-        "id": r[0], "name": r[1], "barcode": r[2], "price": r[3], "preorder_price": r[4],
-        "category": r[5], "stock": r[6], "stock_reserved": r[7], "image_url": r[8], "created_at": r[9],
+        "id": r["id"], 
+        "name": r["name"], 
+        "barcode": r["barcode"], 
+        "price": r["price"], 
+        "preorder_price": r["preorder_price"] if "preorder_price" in r.keys() else None,
+        "category": r["category"], 
+        "stock": r["stock"], 
+        "stock_reserved": r["stock_reserved"] if "stock_reserved" in r.keys() else 0, 
+        "created_at": r["created_at"],
     }
 
 
@@ -445,8 +489,239 @@ async def get_pending_counts() -> dict:
     orders = await _conn.execute_fetchall("SELECT COUNT(*) FROM pending_orders")
     drawer = await _conn.execute_fetchall("SELECT COUNT(*) FROM pending_drawer_txs")
     logs = await _conn.execute_fetchall("SELECT COUNT(*) FROM pending_logs")
+    fulfills = await _conn.execute_fetchall("SELECT COUNT(*) FROM pending_preorder_fulfills")
     return {
         "orders": orders[0][0] if orders else 0,
         "drawer_txs": drawer[0][0] if drawer else 0,
         "logs": logs[0][0] if logs else 0,
+        "preorder_fulfills": fulfills[0][0] if fulfills else 0,
     }
+
+
+# --------------------------------------------------------------------------
+# Pre-order cache
+# --------------------------------------------------------------------------
+
+async def cache_preorders(preorders: list[dict]) -> None:
+    """Replace the local preorder cache with fresh data from MongoDB."""
+    await _conn.execute("DELETE FROM preorders")
+    for p in preorders:
+        await _conn.execute(
+            """INSERT OR REPLACE INTO preorders
+               (id, barcode_code, customer_name, email, items, subtotal,
+                vat_rate, vat_amount, total, status, note, created_by,
+                created_at, fulfilled_at, fulfilled_by, order_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(p.get("_id", p.get("id", ""))),
+                p.get("barcode_code", ""),
+                p.get("customer_name", ""),
+                p.get("email", ""),
+                json.dumps(p.get("items", []), default=str),
+                p.get("subtotal", 0),
+                p.get("vat_rate", 0),
+                p.get("vat_amount", 0),
+                p.get("total", 0),
+                p.get("status", "pending"),
+                p.get("note", ""),
+                p.get("created_by", ""),
+                str(p.get("created_at", "")),
+                str(p.get("fulfilled_at", "")) if p.get("fulfilled_at") else None,
+                p.get("fulfilled_by"),
+                p.get("order_id"),
+            )
+        )
+    await _conn.commit()
+    print(f"[LOCAL_DB] Cached {len(preorders)} preorders.")
+
+
+def _row_to_preorder(r) -> dict:
+    """Convert a preorders table row to a dict matching PreOrderResponse."""
+    return {
+        "id": r[0],
+        "_id": r[0],
+        "barcode_code": r[1],
+        "customer_name": r[2],
+        "email": r[3],
+        "items": json.loads(r[4]) if r[4] else [],
+        "subtotal": r[5] or 0,
+        "vat_rate": r[6] or 0,
+        "vat_amount": r[7] or 0,
+        "total": r[8] or 0,
+        "status": r[9] or "pending",
+        "note": r[10] or "",
+        "created_by": r[11] or "",
+        "created_at": r[12] or "",
+        "fulfilled_at": r[13],
+        "fulfilled_by": r[14],
+        "order_id": r[15],
+    }
+
+
+async def get_cached_preorders(
+    page: int = 1, per_page: int = 20, status_filter: str | None = None
+) -> tuple[list[dict], int]:
+    """Read preorders from the local cache with pagination and optional status filter."""
+    where = ""
+    params: list = []
+    if status_filter:
+        where = "WHERE status = ?"
+        params = [status_filter]
+
+    row = await _conn.execute_fetchall(
+        f"SELECT COUNT(*) FROM preorders {where}", params
+    )
+    total = row[0][0] if row else 0
+
+    offset = (page - 1) * per_page
+    rows = await _conn.execute_fetchall(
+        f"SELECT * FROM preorders {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [per_page, offset],
+    )
+    items = [_row_to_preorder(r) for r in rows]
+    return items, total
+
+
+async def get_cached_preorder_by_barcode(barcode_code: str) -> dict | None:
+    """Find a cached preorder by barcode_code."""
+    rows = await _conn.execute_fetchall(
+        "SELECT * FROM preorders WHERE barcode_code = ?", (barcode_code,)
+    )
+    if not rows:
+        return None
+    return _row_to_preorder(rows[0])
+
+
+async def get_cached_preorder_by_id(preorder_id: str) -> dict | None:
+    """Find a cached preorder by ID."""
+    rows = await _conn.execute_fetchall(
+        "SELECT * FROM preorders WHERE id = ?", (preorder_id,)
+    )
+    if not rows:
+        return None
+    return _row_to_preorder(rows[0])
+
+
+async def update_cached_preorder_status(
+    preorder_id: str,
+    new_status: str,
+    fulfilled_at: str | None = None,
+    fulfilled_by: str | None = None,
+    order_id: str | None = None,
+) -> None:
+    """Update a cached preorder's status (e.g. after offline fulfill)."""
+    await _conn.execute(
+        """UPDATE preorders
+           SET status = ?, fulfilled_at = ?, fulfilled_by = ?, order_id = ?
+           WHERE id = ?""",
+        (new_status, fulfilled_at, fulfilled_by, order_id, preorder_id),
+    )
+    await _conn.commit()
+
+
+# --------------------------------------------------------------------------
+# Order cache (recent orders for offline read)
+# --------------------------------------------------------------------------
+
+async def cache_orders(orders: list[dict]) -> None:
+    """Replace the local order cache with recent data from MongoDB."""
+    await _conn.execute("DELETE FROM orders")
+    for o in orders:
+        doc = dict(o)
+        oid = str(doc.pop("_id", doc.get("id", "")))
+        await _conn.execute(
+            "INSERT OR REPLACE INTO orders (id, order_data, order_number, created_at) VALUES (?, ?, ?, ?)",
+            (
+                oid,
+                json.dumps(doc, default=str),
+                doc.get("order_number", ""),
+                str(doc.get("created_at", "")),
+            ),
+        )
+    await _conn.commit()
+    print(f"[LOCAL_DB] Cached {len(orders)} orders.")
+
+
+async def get_cached_orders(
+    page: int = 1, per_page: int = 20, date: str | None = None
+) -> tuple[list[dict], int]:
+    """Read orders from the local cache with pagination and optional date filter."""
+    where = ""
+    params: list = []
+    if date:
+        where = "WHERE created_at LIKE ?"
+        params = [f"{date}%"]
+
+    row = await _conn.execute_fetchall(
+        f"SELECT COUNT(*) FROM orders {where}", params
+    )
+    total = row[0][0] if row else 0
+
+    offset = (page - 1) * per_page
+    rows = await _conn.execute_fetchall(
+        f"SELECT id, order_data FROM orders {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [per_page, offset],
+    )
+    items = []
+    for r in rows:
+        doc = json.loads(r[1])
+        doc["id"] = r[0]
+        items.append(doc)
+    return items, total
+
+
+async def get_cached_order_by_id(order_id: str) -> dict | None:
+    """Find a cached order by ID."""
+    rows = await _conn.execute_fetchall(
+        "SELECT id, order_data FROM orders WHERE id = ?", (order_id,)
+    )
+    if not rows:
+        return None
+    doc = json.loads(rows[0][1])
+    doc["id"] = rows[0][0]
+    return doc
+
+
+async def save_single_order(order_doc: dict) -> None:
+    """Save a single order to the local cache (used after online/offline creation)."""
+    doc = dict(order_doc)
+    oid = str(doc.pop("_id", doc.get("id", "")))
+    await _conn.execute(
+        "INSERT OR REPLACE INTO orders (id, order_data, order_number, created_at) VALUES (?, ?, ?, ?)",
+        (
+            oid,
+            json.dumps(doc, default=str),
+            doc.get("order_number", ""),
+            str(doc.get("created_at", "")),
+        ),
+    )
+    await _conn.commit()
+
+
+# --------------------------------------------------------------------------
+# Pending preorder fulfills (offline buffer)
+# --------------------------------------------------------------------------
+
+async def queue_preorder_fulfill(data: dict) -> None:
+    """Store a preorder fulfill action in the pending queue."""
+    await _conn.execute(
+        "INSERT INTO pending_preorder_fulfills (fulfill_data, created_at) VALUES (?, ?)",
+        (json.dumps(data, default=str), datetime.now(timezone.utc).isoformat()),
+    )
+    await _conn.commit()
+
+
+async def pop_pending_preorder_fulfills() -> list[dict]:
+    """Retrieve all pending preorder fulfills."""
+    rows = await _conn.execute_fetchall(
+        "SELECT local_id, fulfill_data FROM pending_preorder_fulfills ORDER BY local_id ASC"
+    )
+    return [{"local_id": r[0], "data": json.loads(r[1])} for r in rows]
+
+
+async def remove_pending_preorder_fulfill(local_id: int) -> None:
+    """Remove a specific pending preorder fulfill after successful sync."""
+    await _conn.execute(
+        "DELETE FROM pending_preorder_fulfills WHERE local_id = ?", (local_id,)
+    )
+    await _conn.commit()

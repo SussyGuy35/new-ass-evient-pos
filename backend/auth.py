@@ -136,7 +136,8 @@ async def get_current_user(request: Request) -> dict:
     try:
         users = get_collection("users")
         user = await users.find_one({"_id": ObjectId(user_id)})
-    except Exception:
+    except Exception as e:
+        print("MongoDB error in auth:", e)
         # MongoDB may be down – try local cache
         user = None
 

@@ -18,20 +18,23 @@ async def seed_admin() -> None:
     message. Otherwise it creates the account with the pre-defined
     credentials and prints a success confirmation.
     """
-    users = get_collection("users")
+    try:
+        users = get_collection("users")
 
-    existing = await users.find_one({"username": "evientadmin"})
-    if existing is not None:
-        print("[SEED] Admin account 'evientadmin' already exists – skipping.")
-        return
+        existing = await users.find_one({"username": "evientadmin"})
+        if existing is not None:
+            print("[SEED] Admin account 'evientadmin' already exists – skipping.")
+            return
 
-    admin_doc = {
-        "username": "evientadmin",
-        "password": hash_password("@dmin123"),
-        "full_name": "System Administrator",
-        "role": "admin",
-        "created_at": datetime.now(timezone.utc),
-    }
+        admin_doc = {
+            "username": "evientadmin",
+            "password": hash_password("@dmin123"),
+            "full_name": "Vũ Quản Trị",
+            "role": "admin",
+            "created_at": datetime.now(timezone.utc),
+        }
 
-    await users.insert_one(admin_doc)
-    print("[SEED] Admin account 'evientadmin' created successfully.")
+        await users.insert_one(admin_doc)
+        print("[SEED] Admin account 'evientadmin' created successfully.")
+    except Exception as e:
+        print(f"[SEED] Could not seed admin (likely offline): {e}")

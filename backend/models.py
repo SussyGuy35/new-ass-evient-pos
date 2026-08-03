@@ -77,7 +77,6 @@ class ProductCreate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=100)
     stock: int = Field(default=0, ge=0)
     stock_reserved: int = Field(default=0, ge=0)
-    image_url: Optional[str] = Field(default=None)
 
 
 class ProductUpdate(BaseModel):
@@ -89,7 +88,6 @@ class ProductUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=100)
     stock: Optional[int] = Field(default=None, ge=0)
     stock_reserved: Optional[int] = Field(default=None, ge=0)
-    image_url: Optional[str] = Field(default=None)
 
 
 class ProductResponse(BaseModel):
@@ -104,7 +102,6 @@ class ProductResponse(BaseModel):
     category: Optional[str] = None
     stock: int
     stock_reserved: int = 0
-    image_url: Optional[str] = None
     created_at: datetime
 
     @classmethod
@@ -113,6 +110,12 @@ class ProductResponse(BaseModel):
         doc = dict(doc)
         doc["id"] = str(doc.pop("_id"))
         return cls(**doc)
+
+
+class ExportSheetRequest(BaseModel):
+    product_ids: list[str] = Field(default_factory=list)
+    sort_by: str = "created_at"
+    order: str = "desc"
 
 
 # ---------------------------------------------------------------------------
