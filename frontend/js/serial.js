@@ -5,66 +5,53 @@
 
 let savedPort = null;
 
-async function _fallbackToBackend() {
-    try {
-        const response = await api.post('/hardware/drawer');
-        if (response.success) {
-            console.log('Cash drawer opened via backend fallback.');
-        }
-    } catch (err) {
-        console.error('Backend cash drawer fallback failed:', err);
-        alert('Lỗi mở két tiền (Backend): ' + err.message);
-    }
-}
-
-/**
- * Trigger the cash drawer open command via Web Serial API.
- * Falls back to Backend API if Web Serial is unsupported or fails.
- */
-async function triggerCashDrawer() {
-    // Check browser support
+async function _fallbackToWebSerial() {
     if (!('serial' in navigator)) {
-        console.warn('Web Serial API not supported. Falling back to backend API.');
-        await _fallbackToBackend();
+        console.error('Web Serial API not supported.');
+        alert('Lỗi mở két tiền: Cả server và trình duyệt đều không hỗ trợ.');
         return;
     }
 
     try {
-        // Request port if not already paired
         if (!savedPort) {
             savedPort = await navigator.serial.requestPort();
         }
-
-        // Open the serial port
         await savedPort.open({ baudRate: APP_CONFIG.BAUD_RATE });
-
-        // Get a writer and send the command
         const writer = savedPort.writable.getWriter();
         const data = new TextEncoder().encode(APP_CONFIG.CASH_DRAWER_COMMAND);
         await writer.write(data);
         writer.releaseLock();
-
-        // Close the port
         await savedPort.close();
+        console.log('Cash drawer opened via Web Serial fallback.');
     } catch (err) {
-        // Reset saved port on error to allow re-pairing
         if (err.name === 'NotFoundError') {
-            // User cancelled the port selection dialog
             return;
         }
-
-        console.warn('Web Serial API failed, attempting backend fallback...', err);
-
-        // Try to close the port if it's stuck open
+        console.error('Web Serial API fallback failed:', err);
         try {
             if (savedPort && savedPort.readable) {
                 await savedPort.close();
             }
-        } catch {
-            // Ignore close errors
-        }
-
+        } catch {}
         savedPort = null;
-        await _fallbackToBackend();
+        alert('Lỗi mở két tiền (Web Serial): ' + err.message);
+    }
+}
+
+/**
+ * Trigger the cash drawer open command via Backend API.
+ * Falls back to Web Serial API if Backend fails.
+ */
+async function triggerCashDrawer() {
+    try {
+        const response = await api.post('/hardware/drawer');
+        if (response.success) {
+            console.log('Cash drawer opened via backend API.');
+        } else {
+            throw new Error('Backend returned failure status.');
+        }
+    } catch (err) {
+        console.warn('Backend cash drawer failed, attempting Web Serial fallback...', err);
+        await _fallbackToWebSerial();
     }
 }

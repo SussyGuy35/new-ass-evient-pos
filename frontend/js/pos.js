@@ -86,6 +86,12 @@ async function loadProducts(page = 1, search = '') {
         if (search) {
             url += `&q=${encodeURIComponent(search)}`;
         }
+        
+        const categorySelect = document.getElementById('pos-category-select');
+        if (categorySelect && categorySelect.value) {
+            url += `&category=${encodeURIComponent(categorySelect.value)}`;
+        }
+        
         const sortSelect = document.getElementById('pos-sort-select');
         if (sortSelect && sortSelect.value) {
             const [sortBy, order] = sortSelect.value.split('-');
@@ -926,26 +932,41 @@ async function completeCheckout(paymentMethod, amountGiven, expectedChange, actu
             orderPayload.expected_change = expectedChange;
             orderPayload.actual_change = actualChange;
         }
-
-        const result = await api.post('/orders', orderPayload);
-        const orderId = result.id || result.order_id;
+        const orderId = 'TMP-' + Date.now();
         
-        showToast('Đơn hàng #' + orderId + ' tạo thành công!', 'success');
+        // Save to offline queue
+        let queue = JSON.parse(localStorage.getItem('evient_offline_orders') || '[]');
+        queue.push({ id: orderId, payload: orderPayload });
+        localStorage.setItem('evient_offline_orders', JSON.stringify(queue));
+        
+        showToast('Thanh toán thành công!', 'success');
+
+        // Optimistically update stock locally
+        cart.forEach(item => {
+            const p = products.find(prod => prod.id === item.productId);
+            if (p && typeof p.stock === 'number') {
+                p.stock -= item.quantity;
+                if (p.stock < 0) p.stock = 0;
+            }
+        });
 
         // Clear cart
         cart = [];
         renderCart();
 
-        // Reload products to update stock
-        await loadProducts(currentPage, searchQuery);
+        // Re-render products without hitting API
+        renderProducts(products);
+
+        // Trigger background sync
+        if (typeof window.processOfflineQueue === 'function') {
+            window.processOfflineQueue();
+        }
 
         // Open cash drawer for cash payments or split payments with cash
         if (paymentMethod === 'cash' || (paymentMethod === 'split' && amountGiven > 0)) {
-            try {
-                await triggerCashDrawer();
-            } catch (drawerErr) {
+            triggerCashDrawer().catch(drawerErr => {
                 console.warn('Cash drawer error:', drawerErr);
-            }
+            });
         }
 
         // Show Success state in Modal
@@ -958,16 +979,10 @@ async function completeCheckout(paymentMethod, amountGiven, expectedChange, actu
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
-                    <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 0.5rem;">Thanh toán thành công!</h3>
-                    <p style="color: #94A3B8; margin-bottom: 1.5rem;">Đơn hàng #${orderId}</p>
+                    <h3 style="font-size: 1.25rem; font-weight: 700; color: #E2E8F0; margin-bottom: 0.5rem;">Giao dịch hoàn tất!</h3>
+                    <p style="color: #94A3B8; margin-bottom: 1.5rem;">Sẽ được đồng bộ dưới nền</p>
                     <div style="display: flex; gap: 0.75rem; justify-content: center;">
-                        <button class="btn btn-ghost" onclick="closeCheckoutModal()">Đóng</button>
-                        <button class="btn btn-success" onclick="downloadInvoice('${orderId}')">
-                            <svg class="w-4 h-4 inline-block mr-1 -mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                            </svg>
-                            In hoá đơn
-                        </button>
+                        <button class="btn btn-primary" style="padding-left: 2rem; padding-right: 2rem;" onclick="closeCheckoutModal()">Tiếp tục bán hàng</button>
                     </div>
                 </div>
             `;
@@ -1240,6 +1255,10 @@ function setupEventListeners() {
     const endShiftBtn = document.getElementById('btn-end-shift');
     if (endShiftBtn) {
         endShiftBtn.addEventListener('click', async function () {
+            if (JSON.parse(localStorage.getItem('evient_offline_orders') || '[]').length > 0) {
+                showToast('Không thể kết thúc ca lúc này. Vẫn còn đơn hàng đang chờ đồng bộ dưới nền. Vui lòng đảm bảo kết nối mạng và thử lại sau.', 'error');
+                return;
+            }
             if (confirm('Bạn có chắc muốn kết thúc ca làm và đăng xuất?')) {
                 try {
                     await api.post('/auth/shift/end');
@@ -1372,9 +1391,31 @@ async function submitDrawerTransaction(type) {
     }
 }
 
+async function loadCategoriesForSelect() {
+    try {
+        const categories = await api.get('/categories');
+        const select = document.getElementById('pos-category-select');
+        if (!select) return;
+        
+        let html = '<option value="">Tất cả</option>';
+        if (categories && categories.length > 0) {
+            categories.forEach(cat => {
+                html += `<option value="${escapeHtml(cat.name)}">${escapeHtml(cat.name)}</option>`;
+            });
+        }
+        select.innerHTML = html;
+        if (typeof initCustomSelect === 'function') {
+            initCustomSelect(select);
+        }
+    } catch (err) {
+        console.warn('Could not load categories:', err);
+    }
+}
+
 // --- Initialize POS ---
 function initPOS() {
     setupEventListeners();
+    loadCategoriesForSelect();
     loadProducts();
     renderCart();
     initBarcodeScanner(searchByBarcode);
@@ -1394,3 +1435,58 @@ function initPOS() {
         }
     }
 }
+// --- OFFLINE SYNC ---
+window.isSyncing = false;
+window.processOfflineQueue = async function() {
+    if (window.isSyncing) return;
+    let queue = JSON.parse(localStorage.getItem('evient_offline_orders') || '[]');
+    if (queue.length === 0) return;
+    
+    window.isSyncing = true;
+    if (typeof showSyncIndicator === 'function') showSyncIndicator();
+    
+    while(queue.length > 0) {
+        const currentOrder = queue[0];
+        try {
+            // Post without id field from our queue
+            await api.post('/orders', currentOrder.payload);
+            
+            // Re-fetch queue in case new orders were added while we awaited
+            queue = JSON.parse(localStorage.getItem('evient_offline_orders') || '[]');
+            // Remove the first item (which we just synced)
+            queue.shift();
+            localStorage.setItem('evient_offline_orders', JSON.stringify(queue));
+            
+        } catch (err) {
+            console.error('Lỗi đồng bộ:', err);
+            // Stop syncing on error (likely network)
+            break;
+        }
+    }
+    
+    if (queue.length === 0 && typeof hideSyncIndicator === 'function') {
+        hideSyncIndicator();
+    }
+    window.isSyncing = false;
+};
+
+// Listen to online event to retry
+window.addEventListener('online', () => {
+    if (JSON.parse(localStorage.getItem('evient_offline_orders') || '[]').length > 0) {
+        if (typeof showToast === 'function') showToast('Đã có mạng, đang đồng bộ dữ liệu...', 'info');
+        window.processOfflineQueue();
+    }
+});
+
+// Protect against closing app while syncing
+window.addEventListener('beforeunload', (e) => {
+    if (JSON.parse(localStorage.getItem('evient_offline_orders') || '[]').length > 0) {
+        e.preventDefault();
+        e.returnValue = 'Hệ thống đang đồng bộ. Dữ liệu sẽ lưu lại nếu bạn thoát.';
+    }
+});
+
+// Run once on load
+setTimeout(() => {
+    window.processOfflineQueue();
+}, 2000);

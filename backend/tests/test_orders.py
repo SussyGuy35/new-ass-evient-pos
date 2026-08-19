@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from database import get_collection
+import sync_engine
 
 pytestmark = pytest.mark.asyncio
 
@@ -37,8 +38,11 @@ class TestOrderCreate:
         assert data["vat_amount"] == 2000
         assert data["total"] == 42000
         assert data["actual_revenue"] == 42000
-        assert data["order_number"].startswith("ORD-")
+        assert data["order_number"].startswith("ORD-") or data["order_number"].startswith("OFFLINE-")
         
+        # Sync to remote DB before verifying
+        await sync_engine.push_all_pending()
+
         # Verify drawer state
         drawer_state = await get_collection("drawer_state").find_one({"_id": "main_drawer"})
         assert drawer_state["balance"] >= 42000
@@ -60,6 +64,9 @@ class TestOrderCreate:
         
         res = await async_client.post("/api/orders", json=payload, headers=employee_token)
         assert res.status_code == 201
+        
+        # Sync to remote DB before verifying
+        await sync_engine.push_all_pending()
         
         # Drawer should not change for transfer
         drawer_after = await get_collection("drawer_state").find_one({"_id": "main_drawer"})

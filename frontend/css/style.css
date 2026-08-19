@@ -563,3 +563,113 @@ input, textarea, [contenteditable="true"] {
     transform: scale(0.95);
     background: #475569;
 }
+
+/* ========================================= */
+/* Custom Touch-Friendly Dropdown            */
+/* ========================================= */
+
+.custom-select-wrapper {
+    position: relative;
+    /* Removed flex: 1 to prevent taking too much width */
+}
+
+.custom-select-trigger {
+    width: 100%;
+    min-width: 140px;
+    padding: 0.75rem 1rem;
+    padding-right: 1rem !important;
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    color: #F8FAFC;
+    font-size: 1rem;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem; /* Ensure gap between label and icon */
+    transition: border-color 150ms ease;
+}
+
+.custom-select-label {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+}
+
+.custom-select-trigger:focus, .custom-select-trigger.active {
+    border-color: #3B82F6;
+    outline: none;
+}
+
+.custom-select-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 0;
+    right: 0;
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    display: none;
+    flex-direction: column;
+    overflow: hidden; /* Fix inner corner radius */
+}
+
+.custom-select-panel.active {
+    display: flex;
+}
+
+.custom-select-search {
+    padding: 0.75rem;
+    border-bottom: 1px solid #334155;
+}
+
+.custom-select-search input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: #0F172A;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    color: #F8FAFC;
+    font-size: 1rem;
+}
+
+.custom-select-search input:focus {
+    border-color: #3B82F6;
+    outline: none;
+}
+
+.custom-select-list {
+    max-height: 250px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.custom-select-option {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #334155;
+    cursor: pointer;
+    font-size: 1rem;
+    color: #E2E8F0;
+    transition: background 150ms ease;
+}
+
+.custom-select-option:last-child {
+    border-bottom: none;
+}
+
+.custom-select-option:hover, .custom-select-option.selected {
+    background: #334155;
+}
+
+.custom-select-option-empty {
+    padding: 1.5rem;
+    text-align: center;
+    color: #94A3B8;
+}

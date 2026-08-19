@@ -37,29 +37,40 @@ Tran Thi B,ttb@example.com,Prod 3,3
         files = {"file": ("test.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
 
         res = await async_client.post(
-            "/api/preorders/import-csv",
+            "/api/preorders/preview-csv",
             files=files,
             headers=admin_token
         )
         data = res.json()
         assert res.status_code == 200
-        assert data["success"] == 2
+        assert len(data["valid_preorders"]) == 2
         assert len(data["errors"]) == 0
-        assert len(data["preorders"]) == 2
+
+        # Now confirm the batch
+        confirm_payload = {"valid_preorders": data["valid_preorders"]}
+        res2 = await async_client.post(
+            "/api/preorders/confirm-csv",
+            json=confirm_payload,
+            headers=admin_token
+        )
+        data2 = res2.json()
+        assert res2.status_code == 200
+        assert data2["success"] == 2
+        assert len(data2["preorders"]) == 2
 
         # Verify first preorder (Nguyen Van A)
-        po_a = next(po for po in data["preorders"] if po["email"] == "nva@example.com")
+        po_a = next(po for po in data2["preorders"] if po["email"] == "nva@example.com")
         assert len(po_a["items"]) == 2
         assert po_a["subtotal"] == 40000
         assert po_a["status"] == "pending"
 
         # Verify second preorder (Tran Thi B)
-        po_b = next(po for po in data["preorders"] if po["email"] == "ttb@example.com")
+        po_b = next(po for po in data2["preorders"] if po["email"] == "ttb@example.com")
         assert len(po_b["items"]) == 1
         assert po_b["subtotal"] == 90000
         assert po_b["status"] == "pending"
 
-        # Check that email function was called
+        # Verify that emails were sent (called twice, once per preorder)
         assert mock_send_email.call_count == 2
 
     @patch("routes.preorder_routes.send_preorder_email")
@@ -70,19 +81,19 @@ Test User,test@example.com,NonExistent Product,1
         files = {"file": ("test.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
 
         res = await async_client.post(
-            "/api/preorders/import-csv",
+            "/api/preorders/preview-csv",
             files=files,
             headers=admin_token
         )
         assert res.status_code == 200
         data = res.json()
-        assert data["success"] == 0
+        assert len(data["valid_preorders"]) == 0
         assert len(data["errors"]) == 2
         assert "Không tìm thấy sản phẩm" in data["errors"][0]
 
     async def test_import_preorders_invalid_file(self, async_client: AsyncClient, admin_token):
         res = await async_client.post(
-            "/api/preorders/import-csv",
+            "/api/preorders/preview-csv",
             files={"file": ("test.txt", b"not a csv", "text/plain")},
             headers=admin_token,
         )
@@ -125,8 +136,10 @@ class TestPreOrderFlow:
 Cus A,cusa@example.com,Prod 1,2
 """
         files = {"file": ("test.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
-        res = await async_client.post("/api/preorders/import-csv", files=files, headers=admin_token)
-        return res.json()["preorders"][0]
+        res = await async_client.post("/api/preorders/preview-csv", files=files, headers=admin_token)
+        valid = res.json()["valid_preorders"]
+        res2 = await async_client.post("/api/preorders/confirm-csv", json={"valid_preorders": valid}, headers=admin_token)
+        return res2.json()["preorders"][0]
 
     async def test_list_preorders(self, async_client: AsyncClient, admin_token, created_preorder):
         res = await async_client.get("/api/preorders", headers=admin_token)

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from config import settings
 from database import close_db, connect_db
 from routes.auth_routes import router as auth_router
+from routes.category_routes import router as category_router
 from routes.drawer_routes import router as drawer_router
 from routes.hardware_routes import router as hardware_router
 from routes.invoice_routes import router as invoice_router
@@ -106,6 +107,7 @@ app.include_router(log_router, prefix="/api")
 app.include_router(hardware_router, prefix="/api")
 app.include_router(report_router, prefix="/api")
 app.include_router(preorder_router, prefix="/api")
+app.include_router(category_router, prefix="/api")
 
 
 # --------------------------------------------------------------------------

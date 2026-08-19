@@ -27,7 +27,7 @@ from auth import get_current_user, require_role
 from config import settings
 from database import get_collection
 from middleware import log_action
-from models import PaginatedResponse, PreOrderResponse, PreOrderCreate
+from models import PaginatedResponse, PreOrderResponse, PreOrderCreate, PreOrderConfirmBatch
 from email_service import send_preorder_email
 
 router = APIRouter(prefix="/preorders", tags=["PreOrders"])
@@ -166,12 +166,12 @@ async def _generate_order_number() -> str:
 # Import CSV
 # --------------------------------------------------------------------------
 
-@router.post("/import-csv")
-async def import_csv(
+@router.post("/preview-csv")
+async def preview_csv(
     file: UploadFile = File(...),
     current_user: dict = Depends(require_role("admin", "manager")),
 ):
-    """Upload a CSV file to create pre-orders and send barcode emails."""
+    """Upload a CSV file to parse and validate pre-orders, returning a preview."""
     content = await file.read()
     # Decode with BOM handling (Excel/Google Sheets may add BOM)
     text = content.decode("utf-8-sig")
@@ -185,7 +185,6 @@ async def import_csv(
         )
 
     products_col = get_collection("products")
-    preorders_col = get_collection("preorders")
 
     # Group rows by email → each email = 1 pre-order
     groups: dict[str, dict] = {}
@@ -222,9 +221,8 @@ async def import_csv(
         except ValueError:
             pass
 
-    success_count = 0
     errors: list[str] = []
-    created_preorders = []
+    valid_preorders = []
 
     for email, group in groups.items():
         items_to_save = []
@@ -266,19 +264,49 @@ async def import_csv(
         vat_amount = round(subtotal * (vat_rate / 100), 2)
         total = round(subtotal + vat_amount, 2)
 
-        barcode_code = await _generate_preorder_code()
-
-        doc = {
-            "barcode_code": barcode_code,
+        valid_preorders.append({
             "customer_name": group["customer_name"],
             "email": email,
+            "note": group.get("note", ""),
             "items": items_to_save,
             "subtotal": round(subtotal, 2),
             "vat_rate": vat_rate,
             "vat_amount": vat_amount,
             "total": total,
+        })
+
+    return {
+        "valid_preorders": valid_preorders,
+        "errors": errors,
+    }
+
+
+@router.post("/confirm-csv")
+async def confirm_csv(
+    payload: PreOrderConfirmBatch,
+    current_user: dict = Depends(require_role("admin", "manager")),
+):
+    """Confirm and import the validated pre-orders from the preview step."""
+    preorders_col = get_collection("preorders")
+    products_col = get_collection("products")
+    
+    success_count = 0
+    created_preorders = []
+
+    for pre in payload.valid_preorders:
+        barcode_code = await _generate_preorder_code()
+
+        doc = {
+            "barcode_code": barcode_code,
+            "customer_name": pre.customer_name,
+            "email": pre.email,
+            "items": [item.model_dump() for item in pre.items],
+            "subtotal": pre.subtotal,
+            "vat_rate": pre.vat_rate,
+            "vat_amount": pre.vat_amount,
+            "total": pre.total,
             "status": "pending",
-            "note": group.get("note", ""),
+            "note": pre.note,
             "created_by": current_user.get("full_name", current_user["username"]),
             "created_at": datetime.now(timezone.utc),
             "fulfilled_at": None,
@@ -291,11 +319,11 @@ async def import_csv(
 
         # Reserve stock
         bulk_ops = []
-        for item in items_to_save:
+        for item in pre.items:
             try:
-                pid = ObjectId(item["product_id"])
+                pid = ObjectId(item.product_id)
                 bulk_ops.append(
-                    UpdateOne({"_id": pid}, {"$inc": {"stock_reserved": item["quantity"]}})
+                    UpdateOne({"_id": pid}, {"$inc": {"stock_reserved": item.quantity}})
                 )
             except Exception:
                 pass
@@ -305,16 +333,16 @@ async def import_csv(
         # Send email (non-blocking failure)
         try:
             await send_preorder_email(
-                to_email=email,
-                customer_name=group["customer_name"],
+                to_email=pre.email,
+                customer_name=pre.customer_name,
                 barcode_code=barcode_code,
-                items=items_to_save,
-                subtotal=subtotal,
-                vat_amount=vat_amount,
-                total=total,
+                items=[item.model_dump() for item in pre.items],
+                subtotal=pre.subtotal,
+                vat_amount=pre.vat_amount,
+                total=pre.total,
             )
         except Exception as e:
-            print(f"[PREORDER] Email send failed for {email}: {e}")
+            print(f"[PREORDER] Email send failed for {pre.email}: {e}")
 
         created_preorders.append(PreOrderResponse.from_doc(doc).model_dump())
         success_count += 1
@@ -324,12 +352,11 @@ async def import_csv(
         action="IMPORT_PREORDERS",
         user_id=str(current_user["_id"]),
         username=current_user["username"],
-        details=f"Imported {success_count} pre-orders from CSV. Errors: {len(errors)}",
+        details=f"Confirmed and imported {success_count} pre-orders.",
     )
 
     return {
         "success": success_count,
-        "errors": errors,
         "preorders": created_preorders,
     }
 

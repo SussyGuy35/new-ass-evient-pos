@@ -230,8 +230,49 @@ class PreOrderResponse(BaseModel):
         return cls(**doc)
 
 
+class PreOrderConfirmItem(BaseModel):
+    """A validated pre-order ready for confirmation and creation."""
+    customer_name: str
+    email: str
+    note: str
+    items: list[PreOrderItem]
+    subtotal: float
+    vat_rate: float
+    vat_amount: float
+    total: float
+
+
+class PreOrderConfirmBatch(BaseModel):
+    """Batch of confirmed pre-orders to import."""
+    valid_preorders: list[PreOrderConfirmItem]
+
+
 # ---------------------------------------------------------------------------
-# System logs
+# Categories
+# ---------------------------------------------------------------------------
+
+class CategoryCreate(BaseModel):
+    name: str
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+
+class CategoryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_doc(cls, doc: dict) -> "CategoryResponse":
+        doc = dict(doc)
+        doc["id"] = str(doc.pop("_id"))
+        return cls(**doc)
+
+
+# ---------------------------------------------------------------------------
+# System Settings
 # ---------------------------------------------------------------------------
 
 class SystemLogResponse(BaseModel):

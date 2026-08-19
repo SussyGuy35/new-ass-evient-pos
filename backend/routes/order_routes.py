@@ -11,12 +11,14 @@ from datetime import datetime, timezone
 
 from pymongo import ReturnDocument, UpdateOne
 from bson import ObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, BackgroundTasks
 
-from auth import get_current_user
+from auth import get_current_user, require_role
 from database import get_collection
 from middleware import log_action
 from models import OrderCreate, OrderResponse, PaginatedResponse
+import local_db
+import sync_engine
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
@@ -53,7 +55,8 @@ from config import settings
 async def create_order(
     body: OrderCreate,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(require_role("admin", "manager", "cashier", "employee")),
 ):
     """Create a new point-of-sale order.
 
@@ -121,17 +124,8 @@ async def create_order(
             if p.method == "cash":
                 cash_added += p.amount
 
-    is_offline = False
-    order_number = None
-
-    try:
-        order_number = await _generate_order_number()
-    except Exception:
-        is_offline = True
-
-    if is_offline:
-        import local_db
-        order_number = await local_db.next_offline_order_number()
+    # ALWAYS use optimistic UI (offline-first approach)
+    order_number = await local_db.next_offline_order_number()
 
     doc = {
         "order_number": order_number,
@@ -151,84 +145,25 @@ async def create_order(
         "created_at": datetime.now(timezone.utc),
     }
 
-    if is_offline:
-        import local_db
-        await local_db.queue_order(doc)
-        doc["_id"] = ObjectId()
-        if cash_added > 0:
-            await local_db.update_local_drawer_balance(cash_added)
-            await local_db.queue_drawer_tx({
-                "amount": cash_added,
-                "type": "sale",
-                "note": f"Order {order_number} [OFFLINE]",
-                "user_id": str(current_user["_id"]),
-                "username": current_user["username"],
-                "created_at": doc["created_at"]
-            })
-        for item in body.items:
-            await local_db.deduct_cached_stock(item.product_id, item.quantity)
-    else:
-        try:
-            orders = get_collection("orders")
-            result = await orders.insert_one(doc)
-            doc["_id"] = result.inserted_id
+    doc["_id"] = ObjectId()
+    await local_db.queue_order(doc)
+    if cash_added > 0:
+        await local_db.update_local_drawer_balance(cash_added)
+        await local_db.queue_drawer_tx({
+            "amount": cash_added,
+            "type": "sale",
+            "note": f"Order {order_number} [OPTIMISTIC]",
+            "user_id": str(current_user["_id"]),
+            "username": current_user["username"],
+            "created_at": doc["created_at"]
+        })
+    for item in body.items:
+        await local_db.deduct_cached_stock(item.product_id, item.quantity)
+        
+    is_offline = True # For logging to mark as optimistic/offline
 
-            if cash_added > 0:
-                drawer_state = get_collection("drawer_state")
-                now = datetime.now(timezone.utc)
-                await drawer_state.find_one_and_update(
-                    {"_id": "main_drawer"},
-                    {
-                        "$inc": {"balance": cash_added},
-                        "$set": {"last_updated": now}
-                    },
-                    upsert=True
-                )
-                transactions = get_collection("drawer_transactions")
-                await transactions.insert_one({
-                    "amount": cash_added,
-                    "type": "sale",
-                    "note": f"Order {order_number}",
-                    "user_id": str(current_user["_id"]),
-                    "username": current_user["username"],
-                    "created_at": now
-                })
-
-            products_col = get_collection("products")
-            bulk_ops = []
-            for item in body.items:
-                try:
-                    pid = ObjectId(item.product_id)
-                    bulk_ops.append(UpdateOne(
-                        {"_id": pid},
-                        {"$inc": {"stock": -item.quantity}}
-                    ))
-                except Exception:
-                    pass
-                    
-            if bulk_ops:
-                try:
-                    await products_col.bulk_write(bulk_ops)
-                except Exception:
-                    pass
-        except Exception as exc:
-            print(f"[OFFLINE] Failed during order write, buffering. {exc}")
-            import local_db
-            await local_db.queue_order(doc)
-            doc["_id"] = ObjectId()
-            if cash_added > 0:
-                await local_db.update_local_drawer_balance(cash_added)
-                await local_db.queue_drawer_tx({
-                    "amount": cash_added,
-                    "type": "sale",
-                    "note": f"Order {order_number} [OFFLINE-FALLBACK]",
-                    "user_id": str(current_user["_id"]),
-                    "username": current_user["username"],
-                    "created_at": doc["created_at"]
-                })
-            for item in body.items:
-                await local_db.deduct_cached_stock(item.product_id, item.quantity)
-            is_offline = True
+    # Trigger background sync immediately to push the queued order to MongoDB
+    background_tasks.add_task(sync_engine.sync_pending_orders)
 
     # Audit log
     # Audit log

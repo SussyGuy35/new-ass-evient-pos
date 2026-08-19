@@ -42,9 +42,10 @@ class ApiClient {
         }
 
         if (!response.ok) {
-            const message = (data && typeof data === 'object' && data.detail)
-                ? data.detail
-                : `Lỗi ${response.status}: ${response.statusText}`;
+            let message = `Lỗi ${response.status}: ${response.statusText}`;
+            if (data && typeof data === 'object' && data.detail) {
+                message = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+            }
             throw new Error(message);
         }
 

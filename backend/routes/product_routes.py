@@ -76,8 +76,9 @@ async def export_barcode_sheet(
 @router.get("", response_model=PaginatedResponse)
 async def list_products(
     page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    per_page: int = Query(20, ge=1, le=10000, description="Items per page"),
     q: Optional[str] = Query(None, description="Search term for name or barcode"),
+    category: Optional[str] = Query(None, description="Filter by category"),
     sort_by: str = Query("created_at", description="Field to sort by"),
     order: str = Query("desc", description="Sort order: asc or desc"),
     current_user: dict = Depends(get_current_user),
@@ -94,12 +95,12 @@ async def list_products(
         query_filter: dict = {}
         if q:
             safe_q = re.escape(q)
-            query_filter = {
-                "$or": [
-                    {"name": {"$regex": safe_q, "$options": "i"}},
-                    {"barcode": {"$regex": safe_q, "$options": "i"}},
-                ]
-            }
+            query_filter["$or"] = [
+                {"name": {"$regex": safe_q, "$options": "i"}},
+                {"barcode": {"$regex": safe_q, "$options": "i"}},
+            ]
+        if category:
+            query_filter["category"] = category
 
         total = await products.count_documents(query_filter)
         skip = (page - 1) * per_page
@@ -122,7 +123,7 @@ async def list_products(
     except Exception:
         # Offline fallback → read from SQLite cache
         import local_db
-        cached_items, total = await local_db.get_cached_products(page, per_page, q, sort_by, order)
+        cached_items, total = await local_db.get_cached_products(page, per_page, q, sort_by, order, category)
         return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
 
 
@@ -263,7 +264,7 @@ async def update_product(
             detail="Invalid product ID format.",
         )
 
-    update_data = {k: v for k, v in body.model_dump().items() if v is not None}
+    update_data = body.model_dump(exclude_unset=True)
 
     if not update_data:
         raise HTTPException(

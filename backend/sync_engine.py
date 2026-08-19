@@ -94,6 +94,12 @@ async def sync_pending_orders() -> int:
             # Convert created_at back to datetime if it's a string
             if isinstance(doc.get("created_at"), str):
                 doc["created_at"] = datetime.fromisoformat(doc["created_at"])
+            if "_id" in doc and isinstance(doc["_id"], str):
+                from bson import ObjectId
+                try:
+                    doc["_id"] = ObjectId(doc["_id"])
+                except Exception:
+                    pass
             await orders_col.insert_one(doc)
 
             # Deduct stock on remote for every line item
@@ -277,6 +283,12 @@ async def push_all_pending() -> dict:
 async def sync_remote_to_local() -> None:
     """Download products, users, preorders, and recent orders from MongoDB into SQLite."""
     try:
+        # Sync categories
+        categories_col = get_collection("categories")
+        cursor = categories_col.find({})
+        categories = await cursor.to_list(length=1000)
+        await local_db.cache_categories(categories)
+
         # Sync products
         products_col = get_collection("products")
         cursor = products_col.find({})

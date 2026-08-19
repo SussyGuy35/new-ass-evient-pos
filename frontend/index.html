@@ -36,7 +36,7 @@
     </script>
 
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/style.css?v=2">
 
     <!-- Config & Core Scripts -->
     <script src="config.js?v=10"></script>
@@ -44,7 +44,14 @@
     <script src="js/auth.js?v=10"></script>
     <script src="js/barcode.js?v=10"></script>
     <script src="js/serial.js?v=10"></script>
+    <script src="js/ui.js?v=2"></script>
     <script src="js/pos.js?v=11"></script>
+    <script>
+        // Init custom selects once the DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            initAllCustomSelects();
+        });
+    </script>
 </head>
 <body class="bg-slate-900 font-sans h-screen flex flex-col overflow-hidden">
 
@@ -175,7 +182,10 @@
                         autocomplete="off"
                     >
                 </div>
-                <select id="pos-sort-select" class="form-input form-select text-sm" style="width: auto; min-height: 36px; padding: 0.375rem 2rem 0.375rem 0.75rem; font-size: 0.8125rem;" onchange="loadProducts(1)">
+                <select id="pos-category-select" class="form-input form-select text-sm" style="width: auto; min-height: 36px; padding: 0.375rem 2rem 0.375rem 0.75rem; font-size: 0.8125rem;" onchange="loadProducts(1)">
+                    <option value="">Tất cả</option>
+                </select>
+                <select id="pos-sort-select" data-search="false" class="form-input form-select text-sm" style="width: auto; min-height: 36px; padding: 0.375rem 2rem 0.375rem 0.75rem; font-size: 0.8125rem;" onchange="loadProducts(1)">
                     <option value="created_at-desc">Mới nhất</option>
                     <option value="created_at-asc">Cũ nhất</option>
                     <option value="name-asc">Tên (A-Z)</option>
@@ -232,6 +242,12 @@
                 <!-- Content injected dynamically by showPreorderFulfillModal() -->
             </div>
         </div>
+    </div>
+
+    <!-- ========== SYNC INDICATOR ========== -->
+    <div id="sync-indicator" style="position: fixed; bottom: 1rem; right: 1rem; display: none; align-items: center; gap: 0.5rem; background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(8px); border: 1px solid #334155; padding: 0.375rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; color: #94A3B8; z-index: 50; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: default;">
+        <div style="width: 8px; height: 8px; border-radius: 50%; background-color: #F59E0B; box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);"></div>
+        <span>Đang đồng bộ...</span>
     </div>
 
     <!-- ========== INIT ========== -->

@@ -3,6 +3,7 @@ from httpx import AsyncClient
 from database import get_collection
 from datetime import datetime, timezone, timedelta
 import random
+import sync_engine
 
 pytestmark = pytest.mark.asyncio
 
@@ -108,6 +109,9 @@ class TestInvoices:
         }, headers=employee_token)
         order_id = o_res.json()["id"]
         
+        # Sync to database before invoice lookup
+        await sync_engine.push_all_pending()
+        
         # Get PNG
         png_res = await async_client.get(f"/api/invoices/{order_id}/png", headers=employee_token)
         assert png_res.status_code == 200
@@ -134,6 +138,9 @@ class TestInvoices:
         
         o_res = await async_client.post("/api/orders", json=order_data, headers=admin_token)
         assert o_res.status_code == 201
+        
+        # Sync to database before invoice lookup
+        await sync_engine.push_all_pending()
         
         png_res = await async_client.get(f"/api/invoices/{o_res.json()['id']}/png", headers=admin_token)
         assert png_res.status_code == 200

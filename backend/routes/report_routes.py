@@ -100,8 +100,7 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
             "quantity_sold": {"$sum": "$items.quantity"},
             "revenue": {"$sum": {"$multiply": ["$items.price", "$items.quantity"]}}
         }},
-        {"$sort": {"quantity_sold": -1}},
-        {"$limit": 5}
+        {"$sort": {"quantity_sold": -1}}
     ]
     top_products_docs = await orders.aggregate(pipeline_top_products).to_list(None)
     

@@ -65,6 +65,15 @@ async def _create_tables() -> None:
             created_at TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            "order" INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
@@ -187,15 +196,56 @@ async def cache_products(products: list[dict]) -> None:
     )
     await _conn.commit()
     print(f"[LOCAL_DB] Cached {len(products)} products.")
+    print(f"[LOCAL_DB] Cached {len(products)} products.")
 
 
-async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None = None, sort_by: str = "created_at", order: str = "desc") -> tuple[list[dict], int]:
+# --------------------------------------------------------------------------
+# Category Caching
+# --------------------------------------------------------------------------
+
+async def cache_categories(categories: list[dict]) -> None:
+    """Overwrite the local categories table with fresh data from MongoDB."""
+    await _conn.execute("DELETE FROM categories")
+    for cat in categories:
+        await _conn.execute(
+            """
+            INSERT INTO categories (id, name, description, "order", created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(cat.get("_id", cat.get("id"))),
+                cat.get("name", ""),
+                cat.get("description", ""),
+                cat.get("order", 0),
+                str(cat.get("created_at", "")),
+                str(cat.get("updated_at", "")),
+            )
+        )
+    await _conn.commit()
+
+async def get_cached_categories() -> list[dict]:
+    """Retrieve all cached categories ordered by 'order'."""
+    cursor = await _conn.execute('SELECT * FROM categories ORDER BY "order" ASC')
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None = None, sort_by: str = "created_at", order: str = "desc", category: str | None = None) -> tuple[list[dict], int]:
     """Read products from the local cache with pagination, optional search, and sorting."""
-    where = ""
+    where_clauses = []
     params: list = []
+    
     if q:
-        where = "WHERE name LIKE ? OR barcode LIKE ?"
-        params = [f"%{q}%", f"%{q}%"]
+        where_clauses.append("(name LIKE ? OR barcode LIKE ?)")
+        params.extend([f"%{q}%", f"%{q}%"])
+        
+    if category:
+        where_clauses.append("category = ?")
+        params.append(category)
+        
+    where = ""
+    if where_clauses:
+        where = "WHERE " + " AND ".join(where_clauses)
 
     # Total count
     row = await _conn.execute_fetchall(f"SELECT COUNT(*) as cnt FROM products {where}", params)
