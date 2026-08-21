@@ -60,27 +60,39 @@ function showToast(message, type = 'info') {
 }
 
 // --- Product Loading ---
-async function loadProducts(page = 1, search = '') {
-    currentPage = page;
-    searchQuery = search;
+let isFetchingProducts = false;
+
+async function loadProducts(page = 1, search = '', append = false) {
+    if (isFetchingProducts) return;
+
+    if (!append) {
+        currentPage = page;
+        searchQuery = search;
+    }
 
     const grid = document.getElementById('product-grid');
     if (!grid) return;
 
-    // Show loading state
-    grid.innerHTML = `
-        <div class="empty-state" style="grid-column: 1 / -1; padding: 3rem;">
-            <div class="spinner"></div>
-            <p style="margin-top: 1rem; color: #94A3B8;">Đang tải sản phẩm...</p>
-        </div>
-    `;
+    // Show loading state if not appending
+    if (!append) {
+        grid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1; padding: 3rem;">
+                <div class="spinner"></div>
+                <p style="margin-top: 1rem; color: #94A3B8;">Đang tải sản phẩm...</p>
+            </div>
+        `;
+    }
 
     try {
-        // Abort any pending search request
-        if (searchAbortController) {
-            searchAbortController.abort();
+        isFetchingProducts = true;
+        
+        // Abort any pending search request only if it's a new search (not appending)
+        if (!append) {
+            if (searchAbortController) {
+                searchAbortController.abort();
+            }
+            searchAbortController = new AbortController();
         }
-        searchAbortController = new AbortController();
 
         let url = `/products?page=${page}&per_page=${APP_CONFIG.ITEMS_PER_PAGE}`;
         if (search) {
@@ -98,50 +110,73 @@ async function loadProducts(page = 1, search = '') {
             url += `&sort_by=${sortBy}&order=${order}`;
         }
 
-        const data = await api.get(url, searchAbortController.signal);
+        const data = await api.get(url, append ? null : searchAbortController.signal);
 
-        products = data.items || data.products || data || [];
+        const newProducts = data.items || data.products || data || [];
         totalPages = data.total_pages || data.totalPages || 1;
         currentPage = data.page || data.current_page || page;
+        
+        if (append) {
+            products = products.concat(newProducts);
+        } else {
+            products = newProducts;
+        }
 
-        renderProducts();
-        renderPagination();
+        renderProducts(append, newProducts);
     } catch (err) {
         // Silently ignore aborted requests (replaced by newer search)
         if (err.name === 'AbortError') return;
 
-        grid.innerHTML = `
-            <div class="empty-state" style="grid-column: 1 / -1;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M12 8v4m0 4h.01"/>
-                </svg>
-                <p>Không thể tải sản phẩm</p>
-                <p style="font-size: 0.875rem; margin-top: 0.25rem;">${err.message}</p>
-            </div>
-        `;
+        if (!append) {
+            grid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 8v4m0 4h.01"/>
+                    </svg>
+                    <p>Không thể tải sản phẩm</p>
+                    <p style="font-size: 0.875rem; margin-top: 0.25rem;">${err.message}</p>
+                </div>
+            `;
+        }
         showToast('Lỗi tải sản phẩm: ' + err.message, 'error');
+    } finally {
+        isFetchingProducts = false;
+        
+        // Auto-fetch next page if content doesn't fill the screen yet
+        setTimeout(() => {
+            const scrollContainer = document.getElementById('products-scroll-container');
+            if (scrollContainer && currentPage < totalPages && !isFetchingProducts) {
+                if (scrollContainer.scrollHeight <= scrollContainer.clientHeight + 50) {
+                    loadProducts(currentPage + 1, searchQuery, true);
+                }
+            }
+        }, 100);
     }
 }
 
 // --- Render Products Grid (ONLY updates #product-grid) ---
-function renderProducts() {
+function renderProducts(append = false, items = []) {
     const grid = document.getElementById('product-grid');
     if (!grid) return;
 
-    if (!products || products.length === 0) {
-        grid.innerHTML = `
-            <div class="empty-state" style="grid-column: 1 / -1;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-                </svg>
-                <p>Không tìm thấy sản phẩm</p>
-            </div>
-        `;
+    const itemsToRender = append ? items : products;
+
+    if (!itemsToRender || itemsToRender.length === 0) {
+        if (!append) {
+            grid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                    </svg>
+                    <p>Không tìm thấy sản phẩm</p>
+                </div>
+            `;
+        }
         return;
     }
 
-    grid.innerHTML = products.map(function (p) {
+    const html = itemsToRender.map(function (p) {
         const available = p.stock - (p.stock_reserved || 0);
         const stockClass = available <= 0 ? 'stock-out' : available <= 10 ? 'stock-low' : 'stock-ok';
         
@@ -176,36 +211,12 @@ function renderProducts() {
             </div>
         `;
     }).join('');
-}
 
-// --- Render Pagination (ONLY updates #pagination) ---
-function renderPagination() {
-    const container = document.getElementById('pagination');
-    if (!container) return;
-
-    if (totalPages <= 1) {
-        container.innerHTML = '';
-        return;
+    if (append) {
+        grid.insertAdjacentHTML('beforeend', html);
+    } else {
+        grid.innerHTML = html;
     }
-
-    let html = '<div class="pagination">';
-
-    html += `<button class="page-btn" onclick="loadProducts(${currentPage - 1}, searchQuery)"
-                     ${currentPage <= 1 ? 'disabled' : ''}>
-                ‹ Trước
-             </button>`;
-
-    html += `<span style="color: #94A3B8; font-size: 0.8125rem; padding: 0 0.5rem;">
-                Trang ${currentPage} / ${totalPages}
-             </span>`;
-
-    html += `<button class="page-btn" onclick="loadProducts(${currentPage + 1}, searchQuery)"
-                     ${currentPage >= totalPages ? 'disabled' : ''}>
-                Sau ›
-             </button>`;
-
-    html += '</div>';
-    container.innerHTML = html;
 }
 
 // --- Cart Operations ---
@@ -1419,6 +1430,18 @@ function initPOS() {
     loadProducts();
     renderCart();
     initBarcodeScanner(searchByBarcode);
+
+    // Infinite Scroll setup
+    const scrollContainer = document.getElementById('products-scroll-container');
+    if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', () => {
+            if (isFetchingProducts || currentPage >= totalPages) return;
+            
+            if (scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 100) {
+                loadProducts(currentPage + 1, searchQuery, true);
+            }
+        });
+    }
 
     // Display user info
     const user = auth.getUser();

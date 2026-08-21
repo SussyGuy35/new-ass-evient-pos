@@ -8,13 +8,14 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import asyncio
 
 from pymongo import ReturnDocument, UpdateOne
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, BackgroundTasks
 
 from auth import get_current_user, require_role
-from database import get_collection
+from database import get_collection, is_online
 from middleware import log_action
 from models import OrderCreate, OrderResponse, PaginatedResponse
 import local_db
@@ -65,22 +66,28 @@ async def create_order(
     """
     # Validate stock_reserved vs requested quantity
     try:
-        products_col = get_collection("products")
-        for item in body.items:
-            try:
-                pid = ObjectId(item.product_id)
-                prod = await products_col.find_one({"_id": pid})
-                if prod:
-                    available = prod.get("stock", 0) - prod.get("stock_reserved", 0)
-                    if available < item.quantity:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Sản phẩm '{prod.get('name')}' không đủ số lượng (Còn: {prod.get('stock', 0)}, Đã giữ: {prod.get('stock_reserved', 0)})."
-                        )
-            except Exception as inner_e:
-                if isinstance(inner_e, HTTPException):
-                    raise inner_e
-                pass
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback for stock check)")
+            
+        async def fetch_remote_stock():
+            products_col = get_collection("products")
+            for item in body.items:
+                try:
+                    pid = ObjectId(item.product_id)
+                    prod = await products_col.find_one({"_id": pid})
+                    if prod:
+                        available = prod.get("stock", 0) - prod.get("stock_reserved", 0)
+                        if available < item.quantity:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Sản phẩm '{prod.get('name')}' không đủ số lượng (Còn: {prod.get('stock', 0)}, Đã giữ: {prod.get('stock_reserved', 0)})."
+                            )
+                except Exception as inner_e:
+                    if isinstance(inner_e, HTTPException):
+                        raise inner_e
+                    pass
+                    
+        await asyncio.wait_for(fetch_remote_stock(), timeout=2.0)
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -217,16 +224,22 @@ async def list_orders(
             )
 
     try:
-        total = await orders.count_documents(query_filter)
-        skip = (page - 1) * per_page
-
-        cursor = (
-            orders.find(query_filter)
-            .sort("created_at", -1)
-            .skip(skip)
-            .limit(per_page)
-        )
-        docs = await cursor.to_list(length=per_page)
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+            
+        async def fetch_remote():
+            t = await orders.count_documents(query_filter)
+            s = (page - 1) * per_page
+            c = (
+                orders.find(query_filter)
+                .sort("created_at", -1)
+                .skip(s)
+                .limit(per_page)
+            )
+            d = await c.to_list(length=per_page)
+            return d, t
+            
+        docs, total = await asyncio.wait_for(fetch_remote(), timeout=2.0)
 
         items = [OrderResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
@@ -258,7 +271,13 @@ async def get_order(
         )
 
     try:
-        doc = await orders.find_one({"_id": oid})
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+            
+        async def fetch_remote():
+            return await orders.find_one({"_id": oid})
+            
+        doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         if doc is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

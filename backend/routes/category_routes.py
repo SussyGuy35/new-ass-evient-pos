@@ -9,13 +9,14 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import asyncio
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo import ReturnDocument
 
 from auth import get_current_user, require_role
-from database import get_collection
+from database import get_collection, is_online
 from middleware import log_action
 from models import CategoryCreate, CategoryUpdate, CategoryResponse
 
@@ -27,8 +28,14 @@ import local_db
 async def list_categories():
     """List all product categories, ordered by 'order'. Fallback to local_db if offline."""
     try:
-        categories_col = get_collection("categories")
-        docs = await categories_col.find({}).sort("name", 1).to_list(None)
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+            
+        async def fetch_remote():
+            categories_col = get_collection("categories")
+            return await categories_col.find({}).sort("name", 1).to_list(None)
+            
+        docs = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         return [CategoryResponse.from_doc(d) for d in docs]
     except Exception as e:
         print(f"[CATEGORY] Network error reading categories: {e}. Falling back to local cache.")

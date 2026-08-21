@@ -8,12 +8,13 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pymongo import ReturnDocument
 
 from auth import get_current_user, require_role
-from database import get_collection
+from database import get_collection, is_online
 from middleware import log_action
 from models import (
     DrawerStateResponse,
@@ -29,10 +30,15 @@ router = APIRouter(prefix="/drawer", tags=["Drawer"])
 async def get_drawer_balance(current_user: dict = Depends(get_current_user)):
     """Get the current cash drawer balance."""
     try:
-        drawer_state = get_collection("drawer_state")
-        doc = await drawer_state.find_one({"_id": "main_drawer"})
-        if doc is None:
-            doc = {"balance": 0, "last_updated": datetime.now(timezone.utc)}
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+        
+        async def fetch_remote():
+            drawer_state = get_collection("drawer_state")
+            doc = await drawer_state.find_one({"_id": "main_drawer"})
+            return doc if doc else {"balance": 0, "last_updated": datetime.now(timezone.utc)}
+            
+        doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         return DrawerStateResponse(balance=doc["balance"], last_updated=doc["last_updated"])
     except Exception:
         # Offline fallback
@@ -51,18 +57,24 @@ async def list_transactions(
 ):
     """List paginated drawer transactions."""
     try:
-        transactions = get_collection("drawer_transactions")
-        total = await transactions.count_documents({})
-        skip = (page - 1) * per_page
-
-        cursor = (
-            transactions.find({})
-            .sort("created_at", -1)
-            .skip(skip)
-            .limit(per_page)
-        )
-        docs = await cursor.to_list(length=per_page)
-
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+            
+        async def fetch_remote():
+            transactions = get_collection("drawer_transactions")
+            total = await transactions.count_documents({})
+            skip = (page - 1) * per_page
+    
+            cursor = (
+                transactions.find({})
+                .sort("created_at", -1)
+                .skip(skip)
+                .limit(per_page)
+            )
+            docs = await cursor.to_list(length=per_page)
+            return docs, total
+            
+        docs, total = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         items = [DrawerTransactionResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
     except Exception:

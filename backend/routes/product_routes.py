@@ -11,6 +11,7 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import asyncio
 import re
 from typing import Optional
 
@@ -18,7 +19,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from auth import get_current_user, require_role
-from database import get_collection
+from database import get_collection, is_online
 from middleware import log_action
 from models import (
     PaginatedResponse,
@@ -90,34 +91,40 @@ async def list_products(
     Falls back to local SQLite cache if MongoDB is unreachable.
     """
     try:
-        products = get_collection("products")
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+            
+        async def fetch_remote():
+            products = get_collection("products")
+    
+            query_filter: dict = {}
+            if q:
+                safe_q = re.escape(q)
+                query_filter["$or"] = [
+                    {"name": {"$regex": safe_q, "$options": "i"}},
+                    {"barcode": {"$regex": safe_q, "$options": "i"}},
+                ]
+            if category:
+                query_filter["category"] = category
+    
+            total = await products.count_documents(query_filter)
+            skip = (page - 1) * per_page
+    
+            sort_direction = 1 if order.lower() == "asc" else -1
+            # Prevent sorting on unindexed or non-existent fields trivially by mapping
+            valid_sort_fields = {"created_at", "name", "price", "stock"}
+            sort_field = sort_by if sort_by in valid_sort_fields else "created_at"
+    
+            cursor = (
+                products.find(query_filter)
+                .sort(sort_field, sort_direction)
+                .skip(skip)
+                .limit(per_page)
+            )
+            docs = await cursor.to_list(length=per_page)
+            return docs, total
 
-        query_filter: dict = {}
-        if q:
-            safe_q = re.escape(q)
-            query_filter["$or"] = [
-                {"name": {"$regex": safe_q, "$options": "i"}},
-                {"barcode": {"$regex": safe_q, "$options": "i"}},
-            ]
-        if category:
-            query_filter["category"] = category
-
-        total = await products.count_documents(query_filter)
-        skip = (page - 1) * per_page
-
-        sort_direction = 1 if order.lower() == "asc" else -1
-        # Prevent sorting on unindexed or non-existent fields trivially by mapping
-        valid_sort_fields = {"created_at", "name", "price", "stock"}
-        sort_field = sort_by if sort_by in valid_sort_fields else "created_at"
-
-        cursor = (
-            products.find(query_filter)
-            .sort(sort_field, sort_direction)
-            .skip(skip)
-            .limit(per_page)
-        )
-        docs = await cursor.to_list(length=per_page)
-
+        docs, total = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         items = [ProductResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
     except Exception:
@@ -139,8 +146,14 @@ async def get_product_by_barcode(
     """Find a single product by its exact barcode."""
     doc = None
     try:
-        products = get_collection("products")
-        doc = await products.find_one({"barcode": barcode})
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback)")
+            
+        async def fetch_remote():
+            products = get_collection("products")
+            return await products.find_one({"barcode": barcode})
+            
+        doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception:
         pass  # Offline – try cache below
 

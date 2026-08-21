@@ -7,6 +7,7 @@ Endpoints:
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+import asyncio
 
 from auth import get_current_user
 from config import settings
@@ -93,8 +94,15 @@ async def print_receipt(order_id: str, current_user: dict = Depends(get_current_
     orders_col = get_collection("orders")
     order = None
     try:
-        oid = ObjectId(order_id)
-        order = await orders_col.find_one({"_id": oid})
+        from database import is_online
+        if not is_online():
+            raise Exception("Offline fallback")
+            
+        async def fetch_remote():
+            oid = ObjectId(order_id)
+            return await orders_col.find_one({"_id": oid})
+            
+        order = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception:
         pass
 

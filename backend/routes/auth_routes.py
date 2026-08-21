@@ -11,6 +11,7 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
+import asyncio
 import re
 
 from bson import ObjectId
@@ -23,7 +24,7 @@ from auth import (
     require_role,
     verify_password,
 )
-from database import get_collection
+from database import get_collection, is_online
 from middleware import log_action
 from models import (
     PaginatedResponse,
@@ -54,8 +55,14 @@ async def login(body: UserLogin, request: Request):
     is_offline = False
 
     try:
-        users = get_collection("users")
-        user = await users.find_one({"username": body.username})
+        if not is_online():
+            raise Exception("Offline fallback")
+            
+        async def fetch_remote():
+            users = get_collection("users")
+            return await users.find_one({"username": body.username})
+            
+        user = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception:
         # MongoDB is down – try local cache
         is_offline = True

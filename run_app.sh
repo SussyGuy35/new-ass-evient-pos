@@ -16,7 +16,7 @@ sleep 10
 # Sử dụng --user-data-dir riêng để đảm bảo tiến trình Chrome không bị gộp vào session đang mở của người dùng (gây tắt script ngay lập tức)
 echo "Đang khởi động Client POS..."
 CHROME_PROFILE="$APP_DIR/chrome_profile"
-google-chrome --user-data-dir="$CHROME_PROFILE" --kiosk --disable-pinch --overscroll-history-navigation=0 --disable-dev-shm-usage --disable-extensions --disable-background-networking --disable-sync --disable-translate --no-first-run --disable-infobars --autoplay-policy=no-user-gesture-required http://localhost:8000/login.html
+google-chrome-stable --user-data-dir="$CHROME_PROFILE" --kiosk --disable-pinch --overscroll-history-navigation=0 --disable-dev-shm-usage --disable-extensions --disable-background-networking --disable-sync --disable-translate --no-first-run --disable-infobars --autoplay-policy=no-user-gesture-required http://localhost:8000/login.html
 
 # 3. Tự động dọn dẹp: Khi bạn nhấn Alt+F4 hoặc đóng Chrome, script sẽ chạy tiếp xuống đây và tắt Backend
 echo "Đang tắt Backend Server..."
