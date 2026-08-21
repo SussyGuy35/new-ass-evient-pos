@@ -91,6 +91,8 @@ async def create_order(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        from database import mark_offline
+        mark_offline()
         pass # Offline mode or db error, proceed to offline check
 
     subtotal = sum(item.price * item.quantity for item in body.items)
@@ -244,6 +246,8 @@ async def list_orders(
         items = [OrderResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
     except Exception:
+        from database import mark_offline
+        mark_offline()
         # Offline fallback: read from SQLite order cache
         import local_db
         cached_items, total = await local_db.get_cached_orders(page, per_page, date)
@@ -287,6 +291,8 @@ async def get_order(
     except HTTPException:
         raise
     except Exception:
+        from database import mark_offline
+        mark_offline()
         # Offline fallback: try SQLite cache
         import local_db
         cached = await local_db.get_cached_order_by_id(order_id)

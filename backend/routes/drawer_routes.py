@@ -41,6 +41,8 @@ async def get_drawer_balance(current_user: dict = Depends(get_current_user)):
         doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         return DrawerStateResponse(balance=doc["balance"], last_updated=doc["last_updated"])
     except Exception:
+        from database import mark_offline
+        mark_offline()
         # Offline fallback
         import local_db
         balance = await local_db.get_local_drawer_balance()
@@ -78,6 +80,8 @@ async def list_transactions(
         items = [DrawerTransactionResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
     except Exception:
+        from database import mark_offline
+        mark_offline()
         # Offline fallback: history unavailable
         return PaginatedResponse.build(items=[], total=0, page=page, per_page=per_page)
 

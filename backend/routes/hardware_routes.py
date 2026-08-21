@@ -104,6 +104,8 @@ async def print_receipt(order_id: str, current_user: dict = Depends(get_current_
             
         order = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception:
+        from database import mark_offline
+        mark_offline()
         pass
 
     if not order:

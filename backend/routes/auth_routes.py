@@ -64,6 +64,8 @@ async def login(body: UserLogin, request: Request):
             
         user = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception:
+        from database import mark_offline
+        mark_offline()
         # MongoDB is down – try local cache
         is_offline = True
 

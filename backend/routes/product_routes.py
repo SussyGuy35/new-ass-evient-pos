@@ -128,6 +128,8 @@ async def list_products(
         items = [ProductResponse.from_doc(d).model_dump() for d in docs]
         return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
     except Exception:
+        from database import mark_offline
+        mark_offline()
         # Offline fallback → read from SQLite cache
         import local_db
         cached_items, total = await local_db.get_cached_products(page, per_page, q, sort_by, order, category)
@@ -155,6 +157,8 @@ async def get_product_by_barcode(
             
         doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception:
+        from database import mark_offline
+        mark_offline()
         pass  # Offline – try cache below
 
     if doc is None:

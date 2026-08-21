@@ -44,6 +44,13 @@ def is_online() -> bool:
     """Return current connectivity status."""
     return _is_online
 
+def set_offline() -> None:
+    """Instantly mark the system as offline from a route failure."""
+    global _is_online
+    if _is_online:
+        print("[SYNC] Marked OFFLINE dynamically by a route failure.")
+        _is_online = False
+
 
 # --------------------------------------------------------------------------
 # Connectivity check
@@ -339,7 +346,8 @@ async def start_sync_loop() -> None:
     print(f"[SYNC] Background sync loop started (interval: {SYNC_INTERVAL_SECONDS}s)")
     while True:
         try:
-            await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+            sleep_time = SYNC_INTERVAL_SECONDS if _is_online else 5
+            await asyncio.sleep(sleep_time)
 
             online = await check_online()
 

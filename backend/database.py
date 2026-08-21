@@ -74,3 +74,11 @@ def is_online() -> bool:
     except ImportError:
         return True  # Assume online if sync_engine not loaded yet
 
+def mark_offline() -> None:
+    """Dynamically set system offline from a route."""
+    try:
+        from sync_engine import set_offline
+        set_offline()
+    except ImportError:
+        pass
+

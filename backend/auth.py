@@ -16,7 +16,8 @@ from fastapi import Depends, HTTPException, Request, status
 import bcrypt
 
 from config import settings
-from database import get_collection
+from database import get_collection, is_online
+import asyncio
 
 # Bcrypt password context -------------------------------------------------
 
@@ -134,9 +135,17 @@ async def get_current_user(request: Request) -> dict:
         )
 
     try:
-        users = get_collection("users")
-        user = await users.find_one({"_id": ObjectId(user_id)})
+        if not is_online():
+            raise Exception("MongoDB is offline (fast fallback for auth)")
+            
+        async def fetch_remote():
+            users = get_collection("users")
+            return await users.find_one({"_id": ObjectId(user_id)})
+            
+        user = await asyncio.wait_for(fetch_remote(), timeout=2.0)
     except Exception as e:
+        from database import mark_offline
+        mark_offline()
         print("MongoDB error in auth:", e)
         # MongoDB may be down – try local cache
         user = None

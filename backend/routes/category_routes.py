@@ -38,6 +38,8 @@ async def list_categories():
         docs = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         return [CategoryResponse.from_doc(d) for d in docs]
     except Exception as e:
+        from database import mark_offline
+        mark_offline()
         print(f"[CATEGORY] Network error reading categories: {e}. Falling back to local cache.")
         cached = await local_db.get_cached_categories()
         # Convert _id to id if necessary, though cache returns 'id' already

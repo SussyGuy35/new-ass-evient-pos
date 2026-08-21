@@ -4,7 +4,7 @@
 
 const APP_CONFIG = {
     // Backend API URL
-    API_BASE_URL: 'http://localhost:8000/api',
+    API_BASE_URL: '/api',
 
     // Pagination
     ITEMS_PER_PAGE: 20,
