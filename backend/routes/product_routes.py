@@ -193,6 +193,10 @@ async def create_product(
         ip_address=client_ip,
     )
 
+    # Add to local cache immediately for Local-First UI
+    import local_db
+    await local_db.save_single_product(doc)
+
     return ProductResponse.from_doc(doc)
 
 
@@ -262,6 +266,10 @@ async def update_product(
         ip_address=client_ip,
     )
 
+    # Add to local cache immediately for Local-First UI
+    import local_db
+    await local_db.save_single_product(result)
+
     return ProductResponse.from_doc(result)
 
 
@@ -295,6 +303,10 @@ async def delete_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found.",
         )
+
+    # Delete from local cache immediately
+    import local_db
+    await local_db.delete_cached_product(product_id)
 
     # Audit log
     client_ip = request.client.host if request.client else ""

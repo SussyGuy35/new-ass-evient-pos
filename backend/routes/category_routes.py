@@ -65,70 +65,104 @@ async def create_category(
         details=f"Created category: {payload.name}"
     )
     
+    import local_db
+    await local_db.save_single_category(doc)
     return CategoryResponse.from_doc(doc)
 
-
-@router.put("/{cat_id}", response_model=CategoryResponse)
+@router.put("/{category_id}", response_model=CategoryResponse)
 async def update_category(
-    cat_id: str,
-    payload: CategoryUpdate,
+    category_id: str,
+    body: CategoryUpdate,
+    request: Request,
     current_user: dict = Depends(require_role("admin", "manager")),
 ):
     """Update a category."""
-    if not ObjectId.is_valid(cat_id):
-        raise HTTPException(status_code=400, detail="ID không hợp lệ")
+    categories = get_collection("categories")
+    
+    try:
+        oid = ObjectId(category_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid category ID format.",
+        )
 
-    categories_col = get_collection("categories")
-    
-    update_data = {}
-    if payload.name is not None:
-        update_data["name"] = payload.name
-        
+    update_data = body.model_dump(exclude_unset=True)
     if not update_data:
-        raise HTTPException(status_code=400, detail="Không có dữ liệu cập nhật")
-        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update.",
+        )
+
+    # Check for name duplication if changing name
+    if "name" in update_data and update_data["name"]:
+        dup = await categories.find_one({"name": update_data["name"], "_id": {"$ne": oid}})
+        if dup:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Category '{update_data['name']}' already exists.",
+            )
+
     update_data["updated_at"] = datetime.now(timezone.utc)
-    
-    updated_doc = await categories_col.find_one_and_update(
-        {"_id": ObjectId(cat_id)},
+    result = await categories.find_one_and_update(
+        {"_id": oid},
         {"$set": update_data},
-        return_document=ReturnDocument.AFTER,
+        return_document=True
     )
-    
-    if not updated_doc:
-        raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
-        
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not found.",
+        )
+
+    # Audit log
+    client_ip = request.client.host if request.client else ""
     await log_action(
         action="UPDATE_CATEGORY",
         user_id=str(current_user["_id"]),
         username=current_user["username"],
-        details=f"Updated category: {updated_doc['name']}"
+        details=f"Updated category '{category_id}'. Fields: {list(update_data.keys())}.",
+        ip_address=client_ip,
     )
-    
-    return CategoryResponse.from_doc(updated_doc)
 
+    import local_db
+    await local_db.save_single_category(result)
+    return CategoryResponse.from_doc(result)
 
-@router.delete("/{cat_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{category_id}", status_code=status.HTTP_200_OK)
 async def delete_category(
-    cat_id: str,
+    category_id: str,
+    request: Request,
     current_user: dict = Depends(require_role("admin", "manager")),
 ):
     """Delete a category."""
-    if not ObjectId.is_valid(cat_id):
-        raise HTTPException(status_code=400, detail="ID không hợp lệ")
+    categories = get_collection("categories")
+    try:
+        oid = ObjectId(category_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid category ID format.",
+        )
 
-    categories_col = get_collection("categories")
-    doc = await categories_col.find_one({"_id": ObjectId(cat_id)})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
-        
-    await categories_col.delete_one({"_id": ObjectId(cat_id)})
-    
+    result = await categories.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not found.",
+        )
+
+    # Audit log
+    client_ip = request.client.host if request.client else ""
     await log_action(
         action="DELETE_CATEGORY",
         user_id=str(current_user["_id"]),
         username=current_user["username"],
-        details=f"Deleted category: {doc['name']}"
+        details=f"Deleted category '{category_id}'.",
+        ip_address=client_ip,
     )
-    
-    return None
+
+    import local_db
+    await local_db.delete_cached_category(category_id)
+    return {"message": "Category deleted successfully"}

@@ -196,8 +196,27 @@ async def cache_products(products: list[dict]) -> None:
     )
     await _conn.commit()
     print(f"[LOCAL_DB] Cached {len(products)} products.")
-    print(f"[LOCAL_DB] Cached {len(products)} products.")
 
+async def save_single_product(p: dict) -> None:
+    """Insert or replace a single product in the local cache."""
+    await _conn.execute(
+        """
+        INSERT OR REPLACE INTO products 
+        (id, name, barcode, price, preorder_price, category, stock, stock_reserved, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(p.get("_id", p.get("id", ""))), p["name"], p.get("barcode"), p["price"], p.get("preorder_price"),
+            p.get("category"), p.get("stock", 0), p.get("stock_reserved", 0),
+            str(p.get("created_at", ""))
+        )
+    )
+    await _conn.commit()
+
+async def delete_cached_product(pid: str) -> None:
+    """Delete a single product from the local cache."""
+    await _conn.execute("DELETE FROM products WHERE id = ?", (pid,))
+    await _conn.commit()
 
 # --------------------------------------------------------------------------
 # Category Caching
@@ -228,6 +247,23 @@ async def get_cached_categories() -> list[dict]:
     cursor = await _conn.execute('SELECT * FROM categories ORDER BY "order" ASC')
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+    
+async def save_single_category(cat: dict) -> None:
+    await _conn.execute(
+        """
+        INSERT OR REPLACE INTO categories (id, name, description, "order", created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(cat.get("_id", cat.get("id"))), cat.get("name", ""), cat.get("description", ""),
+            cat.get("order", 0), str(cat.get("created_at", "")), str(cat.get("updated_at", ""))
+        )
+    )
+    await _conn.commit()
+
+async def delete_cached_category(cid: str) -> None:
+    await _conn.execute("DELETE FROM categories WHERE id = ?", (cid,))
+    await _conn.commit()
 
 
 async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None = None, sort_by: str = "created_at", order: str = "desc", category: str | None = None) -> tuple[list[dict], int]:
