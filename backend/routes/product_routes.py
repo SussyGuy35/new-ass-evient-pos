@@ -90,50 +90,9 @@ async def list_products(
     the product name **or** barcode.
     Falls back to local SQLite cache if MongoDB is unreachable.
     """
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
-            
-        async def fetch_remote():
-            products = get_collection("products")
-    
-            query_filter: dict = {}
-            if q:
-                safe_q = re.escape(q)
-                query_filter["$or"] = [
-                    {"name": {"$regex": safe_q, "$options": "i"}},
-                    {"barcode": {"$regex": safe_q, "$options": "i"}},
-                ]
-            if category:
-                query_filter["category"] = category
-    
-            total = await products.count_documents(query_filter)
-            skip = (page - 1) * per_page
-    
-            sort_direction = 1 if order.lower() == "asc" else -1
-            # Prevent sorting on unindexed or non-existent fields trivially by mapping
-            valid_sort_fields = {"created_at", "name", "price", "stock"}
-            sort_field = sort_by if sort_by in valid_sort_fields else "created_at"
-    
-            cursor = (
-                products.find(query_filter)
-                .sort(sort_field, sort_direction)
-                .skip(skip)
-                .limit(per_page)
-            )
-            docs = await cursor.to_list(length=per_page)
-            return docs, total
-
-        docs, total = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-        items = [ProductResponse.from_doc(d).model_dump() for d in docs]
-        return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
-    except Exception:
-        from database import mark_offline
-        mark_offline()
-        # Offline fallback → read from SQLite cache
-        import local_db
-        cached_items, total = await local_db.get_cached_products(page, per_page, q, sort_by, order, category)
-        return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
+    import local_db
+    cached_items, total = await local_db.get_cached_products(page, per_page, q, sort_by, order, category)
+    return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
 
 
 # --------------------------------------------------------------------------
@@ -146,33 +105,14 @@ async def get_product_by_barcode(
     current_user: dict = Depends(get_current_user),
 ):
     """Find a single product by its exact barcode."""
-    doc = None
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
-            
-        async def fetch_remote():
-            products = get_collection("products")
-            return await products.find_one({"barcode": barcode})
-            
-        doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-    except Exception:
-        from database import mark_offline
-        mark_offline()
-        pass  # Offline – try cache below
-
+    import local_db
+    doc = await local_db.get_cached_product_by_barcode(barcode)
     if doc is None:
-        # Offline fallback
-        import local_db
-        cached = await local_db.get_cached_product_by_barcode(barcode)
-        if cached:
-            return cached
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Product with barcode '{barcode}' not found.",
+            detail="Product not found.",
         )
-
-    return ProductResponse.from_doc(doc)
+    return doc
 
 
 # --------------------------------------------------------------------------

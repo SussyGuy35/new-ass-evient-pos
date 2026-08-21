@@ -27,26 +27,11 @@ import local_db
 @router.get("", response_model=list[CategoryResponse])
 async def list_categories():
     """List all product categories, ordered by 'order'. Fallback to local_db if offline."""
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
-            
-        async def fetch_remote():
-            categories_col = get_collection("categories")
-            return await categories_col.find({}).sort("name", 1).to_list(None)
-            
-        docs = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-        return [CategoryResponse.from_doc(d) for d in docs]
-    except Exception as e:
-        from database import mark_offline
-        mark_offline()
-        print(f"[CATEGORY] Network error reading categories: {e}. Falling back to local cache.")
-        cached = await local_db.get_cached_categories()
-        # Convert _id to id if necessary, though cache returns 'id' already
-        for c in cached:
-            if "id" in c and "_id" not in c:
-                c["_id"] = c["id"]
-        return [CategoryResponse.from_doc(c) for c in cached]
+    import local_db
+    cached = await local_db.get_cached_categories()
+    for c in cached:
+        c["id"] = c.get("_id", c.get("id"))
+    return [CategoryResponse(**c) for c in cached]
 
 
 @router.post("", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)

@@ -278,6 +278,19 @@ async def get_cached_products(page: int = 1, per_page: int = 20, q: str | None =
     return items, total
 
 
+async def get_cached_product_by_id(pid: str) -> dict | None:
+    """Find a cached product by id."""
+    rows = await _conn.execute_fetchall("SELECT * FROM products WHERE id = ?", (pid,))
+    if not rows: return None
+    r = rows[0]
+    return {
+        "id": r["id"], "name": r["name"], "barcode": r["barcode"], 
+        "price": r["price"], "preorder_price": r.keys() and "preorder_price" in r.keys() and r["preorder_price"] or None,
+        "category": r["category"], "stock": r["stock"], 
+        "stock_reserved": r.keys() and "stock_reserved" in r.keys() and r["stock_reserved"] or 0, 
+        "created_at": r["created_at"],
+    }
+
 async def get_cached_product_by_barcode(barcode: str) -> dict | None:
     """Find a cached product by exact barcode."""
     rows = await _conn.execute_fetchall(

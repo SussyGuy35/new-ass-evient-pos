@@ -65,35 +65,16 @@ async def create_order(
     total from the line items, and records the cashier.
     """
     # Validate stock_reserved vs requested quantity
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback for stock check)")
-            
-        async def fetch_remote_stock():
-            products_col = get_collection("products")
-            for item in body.items:
-                try:
-                    pid = ObjectId(item.product_id)
-                    prod = await products_col.find_one({"_id": pid})
-                    if prod:
-                        available = prod.get("stock", 0) - prod.get("stock_reserved", 0)
-                        if available < item.quantity:
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"Sản phẩm '{prod.get('name')}' không đủ số lượng (Còn: {prod.get('stock', 0)}, Đã giữ: {prod.get('stock_reserved', 0)})."
-                            )
-                except Exception as inner_e:
-                    if isinstance(inner_e, HTTPException):
-                        raise inner_e
-                    pass
-                    
-        await asyncio.wait_for(fetch_remote_stock(), timeout=2.0)
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        from database import mark_offline
-        mark_offline()
-        pass # Offline mode or db error, proceed to offline check
+    import local_db
+    for item in body.items:
+        prod = await local_db.get_cached_product_by_id(item.product_id)
+        if prod:
+            available = prod.get("stock", 0) - prod.get("stock_reserved", 0)
+            if available < item.quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Sản phẩm '{prod.get('name')}' không đủ số lượng (Còn: {prod.get('stock', 0)}, Đã giữ: {prod.get('stock_reserved', 0)})."
+                )
 
     subtotal = sum(item.price * item.quantity for item in body.items)
     vat_rate = settings.VAT_RATE
@@ -156,6 +137,8 @@ async def create_order(
 
     doc["_id"] = ObjectId()
     await local_db.queue_order(doc)
+    await local_db.save_single_order(doc) # Add to local read cache immediately
+    
     if cash_added > 0:
         await local_db.update_local_drawer_balance(cash_added)
         await local_db.queue_drawer_tx({
@@ -209,49 +192,9 @@ async def list_orders(
     The ``date`` query parameter accepts an ISO date string (``YYYY-MM-DD``)
     and returns orders created on that calendar day (UTC).
     """
-    orders = get_collection("orders")
-    query_filter: dict = {}
-
-    if date:
-        try:
-            day_start = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            day_end = day_start.replace(
-                hour=23, minute=59, second=59, microsecond=999999
-            )
-            query_filter["created_at"] = {"$gte": day_start, "$lte": day_end}
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Invalid date format. Use YYYY-MM-DD.",
-            )
-
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
-            
-        async def fetch_remote():
-            t = await orders.count_documents(query_filter)
-            s = (page - 1) * per_page
-            c = (
-                orders.find(query_filter)
-                .sort("created_at", -1)
-                .skip(s)
-                .limit(per_page)
-            )
-            d = await c.to_list(length=per_page)
-            return d, t
-            
-        docs, total = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-
-        items = [OrderResponse.from_doc(d).model_dump() for d in docs]
-        return PaginatedResponse.build(items=items, total=total, page=page, per_page=per_page)
-    except Exception:
-        from database import mark_offline
-        mark_offline()
-        # Offline fallback: read from SQLite order cache
-        import local_db
-        cached_items, total = await local_db.get_cached_orders(page, per_page, date)
-        return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
+    import local_db
+    cached_items, total = await local_db.get_cached_orders(page, per_page, date)
+    return PaginatedResponse.build(items=cached_items, total=total, page=page, per_page=per_page)
 
 
 # --------------------------------------------------------------------------
@@ -280,25 +223,33 @@ async def get_order(
             
         async def fetch_remote():
             return await orders.find_one({"_id": oid})
+async def get_order(order_id: str, current_user: dict = Depends(get_current_user)):
+    """Return a single order by its ID (Local-First)."""
+    import local_db
+    cached = await local_db.get_cached_order_by_id(order_id)
+    if cached:
+        return cached
+
+    # If not in cache (e.g. very old order), try remote
+    try:
+        if not is_online():
+            raise Exception("MongoDB is offline")
+            
+        async def fetch_remote():
+            orders = get_collection("orders")
+            return await orders.find_one({"_id": ObjectId(order_id)})
             
         doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-        if doc is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Order not found.",
-            )
-        return OrderResponse.from_doc(doc)
-    except HTTPException:
-        raise
     except Exception:
-        from database import mark_offline
-        mark_offline()
-        # Offline fallback: try SQLite cache
-        import local_db
-        cached = await local_db.get_cached_order_by_id(order_id)
-        if cached:
-            return cached
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Order lookup unavailable while offline.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found (offline).",
         )
+
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found.",
+        )
+
+    return OrderResponse.from_doc(doc)

@@ -88,25 +88,22 @@ async def print_receipt(order_id: str, current_user: dict = Depends(get_current_
 
     # Fetch order
     from database import get_collection
+    from database import get_collection, is_online
     from bson import ObjectId
     import local_db
 
-    orders_col = get_collection("orders")
-    order = None
-    try:
-        from database import is_online
-        if not is_online():
-            raise Exception("Offline fallback")
-            
-        async def fetch_remote():
-            oid = ObjectId(order_id)
-            return await orders_col.find_one({"_id": oid})
-            
-        order = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-    except Exception:
-        from database import mark_offline
-        mark_offline()
-        pass
+    order = await local_db.get_cached_order_by_id(order_id)
+
+    if not order:
+        try:
+            if not is_online():
+                raise Exception("MongoDB is offline")
+            async def fetch_remote():
+                orders = get_collection("orders")
+                return await orders.find_one({"_id": ObjectId(order_id)})
+            order = await asyncio.wait_for(fetch_remote(), timeout=2.0)
+        except Exception:
+            pass
 
     if not order:
         order = await local_db.get_pending_order_by_id(order_id)

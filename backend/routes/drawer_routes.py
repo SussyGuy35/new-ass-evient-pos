@@ -29,52 +29,28 @@ router = APIRouter(prefix="/drawer", tags=["Drawer"])
 @router.get("", response_model=DrawerStateResponse)
 async def get_drawer_balance(current_user: dict = Depends(get_current_user)):
     """Get the current cash drawer balance."""
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
-        
-        async def fetch_remote():
-            drawer_state = get_collection("drawer_state")
-            doc = await drawer_state.find_one({"_id": "main_drawer"})
-            return doc if doc else {"balance": 0, "last_updated": datetime.now(timezone.utc)}
-            
-        doc = await asyncio.wait_for(fetch_remote(), timeout=2.0)
-        return DrawerStateResponse(balance=doc["balance"], last_updated=doc["last_updated"])
-    except Exception:
-        from database import mark_offline
-        mark_offline()
-        # Offline fallback
-        import local_db
-        balance = await local_db.get_local_drawer_balance()
-        return DrawerStateResponse(
-            balance=balance,
-            last_updated=datetime.now(timezone.utc)
-        )
+    import local_db
+    balance = await local_db.get_local_drawer_balance()
+    # local_db doesn't store last_updated trivially in get, but we can just use now
+    from datetime import datetime, timezone
+    return DrawerStateResponse(balance=balance, last_updated=datetime.now(timezone.utc))
 
 @router.get("/transactions", response_model=PaginatedResponse)
 async def list_transactions(
     page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-    current_user: dict = Depends(get_current_user)
+    per_page: int = Query(20, ge=1, le=1000),
+    current_user: dict = Depends(require_role("admin", "manager")),
 ):
-    """List paginated drawer transactions."""
+    """List drawer transactions. Local-first: currently local doesn't store history except pending, so we return empty or just pending. Actually, since this is an admin feature, we'll return empty list for offline, or we can fetch remote directly if we need history."""
     try:
         if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
+            raise Exception("MongoDB is offline")
             
         async def fetch_remote():
-            transactions = get_collection("drawer_transactions")
-            total = await transactions.count_documents({})
-            skip = (page - 1) * per_page
-    
-            cursor = (
-                transactions.find({})
-                .sort("created_at", -1)
-                .skip(skip)
-                .limit(per_page)
-            )
-            docs = await cursor.to_list(length=per_page)
-            return docs, total
+            col = get_collection("drawer_transactions")
+            total = await col.count_documents({})
+            cursor = col.find({}).sort("created_at", -1).skip((page - 1) * per_page).limit(per_page)
+            return await cursor.to_list(length=per_page), total
             
         docs, total = await asyncio.wait_for(fetch_remote(), timeout=2.0)
         items = [DrawerTransactionResponse.from_doc(d).model_dump() for d in docs]
@@ -82,7 +58,6 @@ async def list_transactions(
     except Exception:
         from database import mark_offline
         mark_offline()
-        # Offline fallback: history unavailable
         return PaginatedResponse.build(items=[], total=0, page=page, per_page=per_page)
 
 

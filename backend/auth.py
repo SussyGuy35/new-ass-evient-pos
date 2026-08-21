@@ -135,8 +135,16 @@ async def get_current_user(request: Request) -> dict:
         )
 
     try:
+        import local_db
+        user = await local_db.get_cached_user_by_id(user_id)
+        if user:
+            return user
+    except Exception:
+        pass
+
+    try:
         if not is_online():
-            raise Exception("MongoDB is offline (fast fallback for auth)")
+            raise Exception("MongoDB is offline")
             
         async def fetch_remote():
             users = get_collection("users")
@@ -146,19 +154,9 @@ async def get_current_user(request: Request) -> dict:
     except Exception as e:
         from database import mark_offline
         mark_offline()
-        print("MongoDB error in auth:", e)
-        # MongoDB may be down – try local cache
         user = None
 
     if user is None:
-        # Fallback to local SQLite cache
-        try:
-            import local_db
-            cached = await local_db.get_cached_user_by_id(user_id)
-            if cached:
-                return cached
-        except Exception:
-            pass
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found.",
