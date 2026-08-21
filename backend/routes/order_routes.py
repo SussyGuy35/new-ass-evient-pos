@@ -206,24 +206,6 @@ async def get_order(
     order_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Return a single order by its ID."""
-    orders = get_collection("orders")
-
-    try:
-        oid = ObjectId(order_id)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid order ID format.",
-        )
-
-    try:
-        if not is_online():
-            raise Exception("MongoDB is offline (fast fallback)")
-            
-        async def fetch_remote():
-            return await orders.find_one({"_id": oid})
-async def get_order(order_id: str, current_user: dict = Depends(get_current_user)):
     """Return a single order by its ID (Local-First)."""
     import local_db
     cached = await local_db.get_cached_order_by_id(order_id)
