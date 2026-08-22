@@ -27,7 +27,11 @@ function switchTab(tabName) {
 
     // Update tab panels
     document.querySelectorAll('.tab-panel').forEach(function (panel) {
-        panel.style.display = panel.id === 'panel-' + tabName ? 'block' : 'none';
+        if (panel.id === 'panel-' + tabName) {
+            panel.style.display = panel.classList.contains('flex-col') ? 'flex' : 'block';
+        } else {
+            panel.style.display = 'none';
+        }
     });
 
     // Load data for the active tab
@@ -69,7 +73,7 @@ async function loadDashboard() {
         const data = await api.get('/reports/dashboard');
         
         let html = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+            <div class="flex-shrink-0" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
                 <div class="bg-slate-700 p-4 rounded-xl border border-slate-600">
                     <div class="text-sm text-slate-400 mb-1">Doanh thu hôm nay</div>
                     <div class="text-2xl font-bold text-blue-400">${formatCurrency(data.today.revenue)}</div>
@@ -94,9 +98,9 @@ async function loadDashboard() {
                 </div>
             </div>
             
-            <h3 class="text-lg font-bold text-white mb-4">Sản phẩm Bán chạy</h3>
-            <div style="max-height: 400px; overflow-y: auto; border: 1px solid #334155; border-radius: 0.75rem;">
-                <table class="admin-table">
+            <h3 class="text-lg font-bold text-white mb-4 flex-shrink-0">Sản phẩm Bán chạy</h3>
+            <div class="border border-slate-700 rounded-xl bg-slate-800 relative">
+                <table class="admin-table w-full">
                 <thead>
                     <tr>
                         <th>Sản phẩm / Danh mục</th>
@@ -154,6 +158,10 @@ async function loadAdminProducts(page = 1) {
             const [sortBy, order] = sortSelect.value.split('-');
             url += `&sort_by=${sortBy}&order=${order}`;
         }
+        const catFilter = document.getElementById('product-category-filter');
+        if (catFilter && catFilter.value) {
+            url += `&category=${encodeURIComponent(catFilter.value)}`;
+        }
 
         const data = await api.get(url);
         const items = data.items || data.products || data || [];
@@ -165,7 +173,7 @@ async function loadAdminProducts(page = 1) {
         }
 
         let html = `
-            <table class="admin-table">
+            <table class="admin-table w-full">
                 <thead>
                     <tr>
                         <th style="width: 40px; text-align: center;">
@@ -1641,6 +1649,27 @@ function initAdmin() {
     }
 
     // Load initial tab
+    populateProductCategoryFilter();
     switchTab('dashboard');
+}
+
+async function populateProductCategoryFilter() {
+    try {
+        const filter = document.getElementById('product-category-filter');
+        if (!filter) return;
+        const categories = await api.get('/categories');
+        let options = '<option value="">Tất cả danh mục</option>';
+        if (categories && categories.length > 0) {
+            categories.forEach(cat => {
+                options += `<option value="${escapeHtml(cat.name)}">${escapeHtml(cat.name)}</option>`;
+            });
+        }
+        filter.innerHTML = options;
+        if (typeof initAllCustomSelects === 'function') {
+            setTimeout(initAllCustomSelects, 100);
+        }
+    } catch (e) {
+        console.error("Lỗi tải danh mục cho filter:", e);
+    }
 }
 
