@@ -99,7 +99,7 @@ async function loadDashboard() {
                 <table class="admin-table">
                 <thead>
                     <tr>
-                        <th>Sản phẩm</th>
+                        <th>Sản phẩm / Danh mục</th>
                         <th style="text-align: right;">Đã bán</th>
                         <th style="text-align: right;">Doanh thu</th>
                     </tr>
@@ -111,7 +111,10 @@ async function loadDashboard() {
             data.top_products.forEach(p => {
                 html += `
                     <tr>
-                        <td style="font-weight: 500; color: #E2E8F0;">${escapeHtml(p.name)}</td>
+                        <td style="font-weight: 500; color: #E2E8F0;">
+                            ${escapeHtml(p.name)}
+                            <div style="font-size: 0.75rem; color: #94A3B8; font-weight: normal; margin-top: 2px;">${escapeHtml(p.category)}</div>
+                        </td>
                         <td style="text-align: right; color: #94A3B8;">${p.quantity}</td>
                         <td style="text-align: right; color: #3B82F6; font-weight: 500;">${formatCurrency(p.revenue)}</td>
                     </tr>

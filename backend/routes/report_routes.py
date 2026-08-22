@@ -104,6 +104,11 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
     ]
     top_products_docs = await orders.aggregate(pipeline_top_products).to_list(None)
     
+    import local_db
+    for p in top_products_docs:
+        cached = await local_db.get_cached_product_by_id(p["_id"])
+        p["category"] = cached.get("category", "Không rõ") if cached else "Không rõ"
+
     return {
         "today": {
             "revenue": today_revenue,
@@ -120,6 +125,7 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin",
             {
                 "id": p["_id"],
                 "name": p["name"],
+                "category": p["category"],
                 "quantity": p["quantity_sold"],
                 "revenue": p["revenue"]
             } for p in top_products_docs

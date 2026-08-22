@@ -1,5 +1,5 @@
-customer_name,email,note,product_name,quantity
-Trần Quang Bách,tqbach184@gmail.com,Giao gấp vào chiều nay,Cái thứ hai,2
-Trần Quang Bách,tqbach184@gmail.com,Giao gấp vào chiều nay,Plushie Ijichi Nijika thư giãn,1
-Leejika,leejika36@gmail.com,,Test test test,3
-Leejika,leejika36@gmail.com,,Tea+ Chanh Yuzu,2
+customer_name,email,note,product_name,barcode,quantity
+Trần Quang Bách,tqbach184@gmail.com,Giao gấp vào chiều nay,Cái thứ hai,,2
+Trần Quang Bách,tqbach184@gmail.com,Giao gấp vào chiều nay,,123456789,1
+Leejika,leejika36@gmail.com,,Test test test,,3
+Leejika,leejika36@gmail.com,,Tea+ Chanh Yuzu,,2

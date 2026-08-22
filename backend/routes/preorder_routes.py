@@ -177,11 +177,16 @@ async def preview_csv(
     text = content.decode("utf-8-sig")
 
     reader = csv.DictReader(io.StringIO(text))
-    required_cols = {"customer_name", "email", "product_name", "quantity"}
+    required_cols = {"customer_name", "email", "quantity"}
     if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"CSV thiếu cột bắt buộc. Cần có: {', '.join(sorted(required_cols))}",
+            detail=f"CSV thiếu cột bắt buộc. Cần có: {', '.join(sorted(required_cols))}, và (product_name hoặc barcode)",
+        )
+    if "product_name" not in reader.fieldnames and "barcode" not in reader.fieldnames:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CSV phải có ít nhất một trong hai cột 'product_name' hoặc 'barcode'",
         )
 
     products_col = get_collection("products")
@@ -207,14 +212,19 @@ async def preview_csv(
                     groups[email]["note"] += f" | {note}"
                 else:
                     groups[email]["note"] = note
-        prod_name = row.get("product_name", "").strip()
-        if not prod_name:
+        
+        prod_name = row.get("product_name", "").strip() if "product_name" in row else ""
+        barcode = row.get("barcode", "").strip() if "barcode" in row else ""
+        
+        if not prod_name and not barcode:
             continue
+            
         try:
             qty = int(row.get("quantity", "0").strip())
             if qty > 0:
                 groups[email]["items"].append({
                     "product_name": prod_name,
+                    "barcode": barcode,
                     "quantity": qty,
                     "row": row_num,
                 })
@@ -230,20 +240,29 @@ async def preview_csv(
 
         for item in group["items"]:
             prod_name = item["product_name"]
-            safe_name = re.escape(prod_name)
-
-            # 1. Exact case-insensitive match
-            product = await products_col.find_one(
-                {"name": {"$regex": f"^{safe_name}$", "$options": "i"}}
-            )
-            # 2. Fallback to contains
-            if not product:
+            barcode = item.get("barcode", "")
+            
+            product = None
+            
+            # 1. Exact barcode match if barcode provided
+            if barcode:
+                product = await products_col.find_one({"barcode": barcode})
+                
+            # 2. Exact case-insensitive name match if name provided
+            if not product and prod_name:
+                safe_name = re.escape(prod_name)
                 product = await products_col.find_one(
-                    {"name": {"$regex": safe_name, "$options": "i"}}
+                    {"name": {"$regex": f"^{safe_name}$", "$options": "i"}}
                 )
+                # 3. Fallback to contains name
+                if not product:
+                    product = await products_col.find_one(
+                        {"name": {"$regex": safe_name, "$options": "i"}}
+                    )
 
             if not product:
-                errors.append(f"Dòng {item['row']}: Không tìm thấy sản phẩm '{prod_name}'")
+                identifier = f"mã vạch '{barcode}'" if barcode else f"tên '{prod_name}'"
+                errors.append(f"Dòng {item['row']}: Không tìm thấy sản phẩm {identifier}")
                 continue
 
             price = float(product.get("preorder_price") if product.get("preorder_price") is not None else product.get("price", 0))
